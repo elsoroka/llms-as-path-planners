@@ -28,7 +28,7 @@ OUT_DIR="$SCRIPT_DIR/outputs"
 # --- Defaults ---
 REPR="text"
 MAX_SAMPLES_ARG=""
-MAX_TRIES=3
+MAX_TRIES=7
 
 # --- Argument parsing ---
 while [[ $# -gt 0 ]]; do
