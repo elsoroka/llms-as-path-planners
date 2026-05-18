@@ -1,12 +1,13 @@
 """
-Evaluate code-form inference outputs and write a CSV summary.
+Evaluate code-form and baseline inference outputs and write a CSV summary.
 
-Works with outputs from both:
-  - gpt-4-path-planning/src/outputs/   (filenames: code_form_{geometry}_{split}_k{K}_{repr}.jsonl)
-  - ppnl-spatial-temporal-reasoning/ICL/outputs/  (filenames: code_form_k{K}_{testset}.jsonl)
+Works with outputs from:
+  - gpt-4-path-planning/src/outputs/        code_form_{geometry}_{split}_k{K}_{repr}.jsonl
+  - ppnl-spatial-temporal-reasoning/ICL/outputs/  code_form_k{K}_{testset}.jsonl
+  - ppnl-spatial-temporal-reasoning/ICL/outputs/  baseline_5shot_{testset}.jsonl
 
-Reads directly from the raw *.jsonl files (re-parses move_x/move_y calls inline),
-so *_parsed.json intermediaries are not required.
+Reads directly from the raw *.jsonl files, so *_parsed.json intermediaries
+are not required.
 
 Usage:
     python eval_code_form.py [--outputs-dir DIR] [--out CSV]
@@ -48,10 +49,19 @@ def _parse_response(response):
     return ' '.join(actions), skipped
 
 
+def _extract_direction_tokens(response):
+    """Extract plain direction tokens from a baseline response string."""
+    return ' '.join(t for t in response.split() if t in ('up', 'down', 'left', 'right'))
+
+
 def _resolve(record):
     """
     Return (action_str, error, successful_try) for one raw jsonl record.
-    Handles both multi-try (attempts list) and legacy (single response) formats.
+
+    Handles three formats:
+      - multi-try code_form  (has 'attempts' list with move_x/move_y responses)
+      - single-response code_form  (has 'response' with move_x/move_y calls)
+      - baseline  (has 'response' with plain direction tokens)
     """
     attempts = record.get('attempts', [])
     if attempts:
@@ -62,10 +72,19 @@ def _resolve(record):
         last = attempts[-1]
         actions, _ = _parse_response(last['response'])
         return actions, last['error'], None
-    # Legacy single-response format
+
     response = record['response']
-    actions, skipped = _parse_response(response)
-    error = record.get('error') or (f"Non-integer arg(s): {skipped}" if skipped else None)
+    error    = record.get('error')
+
+    # Detect format by presence of move_x/move_y calls
+    if 'move_' in response:
+        actions, skipped = _parse_response(response)
+        if not error and skipped:
+            error = f"Non-integer arg(s): {skipped}"
+    else:
+        # Baseline: response is plain direction tokens
+        actions = _extract_direction_tokens(response)
+
     return actions, error, (1 if error is None else None)
 
 
@@ -73,12 +92,21 @@ def _resolve(record):
 # Metadata extraction
 # ---------------------------------------------------------------------------
 
+def _ppnl_testset_meta(testset):
+    """Extract grid_size and visibility from a PPNL testset name string."""
+    grid_m  = re.search(r'\d+x\d+(?:more_obstacles)?', testset)
+    grid    = grid_m.group(0) if grid_m else ''
+    vis     = 'unseen' if 'unseen' in testset else 'seen'
+    return grid, vis
+
+
 def _parse_filename(stem):
     """
-    Try both known filename patterns and return a metadata dict.
+    Try all known filename patterns and return a metadata dict.
 
-    gpt-4 pattern:  code_form_{geometry}_{split}_k{K}_{repr}
-    PPNL pattern:   code_form_k{K}_{testset_name}
+    gpt-4 pattern:     code_form_{geometry}_{split}_k{K}_{repr}
+    PPNL code pattern: code_form_k{K}_{testset_name}
+    PPNL baseline:     baseline_5shot_{testset_name}
     """
     # gpt-4-path-planning
     m = re.match(
@@ -97,19 +125,30 @@ def _parse_filename(stem):
             'max_tries':  int(d['max_tries']),
         }
 
-    # PPNL
+    # PPNL code_form
     m = re.match(r'code_form_k(?P<max_tries>\d+)_(?P<testset>.+)$', stem)
     if m:
-        testset = m.group('testset')
-        grid    = (re.search(r'\d+x\d+(?:more_obstacles)?', testset) or re.search(r'', ''))
-        vis     = 'seen' if 'unseen' not in testset else 'unseen'
+        grid, vis = _ppnl_testset_meta(m.group('testset'))
         return {
             'geometry':   '',
             'split':      '',
-            'grid_size':  grid.group(0) if grid and grid.group(0) else '',
+            'grid_size':  grid,
             'visibility': vis,
-            'repr':       'text',   # PPNL code_form only uses text
+            'repr':       'text',
             'max_tries':  int(m.group('max_tries')),
+        }
+
+    # PPNL baseline (5-shot ICL, single attempt)
+    m = re.match(r'baseline_5shot_(?P<testset>.+)$', stem)
+    if m:
+        grid, vis = _ppnl_testset_meta(m.group('testset'))
+        return {
+            'geometry':   '',
+            'split':      '',
+            'grid_size':  grid,
+            'visibility': vis,
+            'repr':       '5-shot',
+            'max_tries':  1,
         }
 
     return {'geometry': '', 'split': '', 'grid_size': '', 'visibility': '',
@@ -213,10 +252,10 @@ def main():
     out_dir  = args.outputs_dir
     csv_path = args.out or out_dir / 'results.csv'
 
-    # Find raw inference files; skip test/smoke files without a config pattern
+    # Find raw inference files; skip test/smoke files without a known pattern
     jsonl_files = sorted(
         p for p in out_dir.glob('*.jsonl')
-        if re.match(r'code_form_', p.stem)
+        if re.match(r'(code_form|baseline)_', p.stem)
     )
     if not jsonl_files:
         print(f"No code_form_*.jsonl files found in {out_dir}", file=sys.stderr)
