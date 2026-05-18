@@ -1,16 +1,15 @@
 from helpers import fixed_length, single_environment, group_environments, decompose_sample
 from prompting import n_shot_prompt, next_example, VALS_OOD, VALS_IID
-from openai import AzureOpenAI
+from openai import OpenAI
 import json
 import time
+import os
 from evaluate import success_sg
 import sys
+from dotenv import load_dotenv
 
-client = AzureOpenAI(
-    azure_endpoint="",
-    api_version="",
-    api_key=""
-)
+load_dotenv()
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 def inference(prompt, model='gpt-4-turbo', message_texts = None):
     print(prompt)
@@ -112,9 +111,9 @@ def main():
         iid_data = json.load(iid_file)
         ood_data = json.load(ood_file)
 
-        grouped =  group_environments(data=iid_data + ood_data, geometry=geometry)            
+        grouped =  group_environments(data=iid_data + ood_data, geometry=geometry)
 
-        n_environments = 30
+        n_environments = int(sys.argv[6]) if len(sys.argv) > 6 else 30
         valid = {}
         for id_ in grouped.keys():
            print(len(grouped[id_]['OOD']))         

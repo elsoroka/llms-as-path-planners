@@ -1,15 +1,13 @@
-import openai
-import os 
+import os
 import json
 import time
 import sys
 import tiktoken
-import sys
+from openai import OpenAI
+from dotenv import load_dotenv
 
-openai.organization = ""
-key = ""
-openai.api_key = key
-openai.Model.list()
+load_dotenv()
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
     """Returns the number of tokens in a text string."""
@@ -49,7 +47,7 @@ Actions:
             'token_count': inp_tokens
         })
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages = [{"role": "user", "content": prompt_}],
             temperature = 0.0,
@@ -60,10 +58,10 @@ Actions:
         test = {
             "english": eng[i]['nl_description'],
             "ground_truth":eng[i]['agent_as_a_point'],
-            "predicted": response['choices'][0]['message']['content'],
+            "predicted": response.choices[0].message.content,
             'world': eng[i]['world'],
-            'prompt_tokens': response['usage']['prompt_tokens'],
-            'gen_tokens': response['usage']['completion_tokens'],
+            'prompt_tokens': response.usage.prompt_tokens,
+            'gen_tokens': response.usage.completion_tokens,
             'prompt': prompt_
         }
           
@@ -77,7 +75,7 @@ Task: {eng[i]['nl_description']}
 Actions: 
         """
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages = [{"role": "user", "content": prompt_}],
             temperature = 0.0,
@@ -88,15 +86,15 @@ Actions:
         test = {
             "english": eng[i]['nl_description'],
             "ground_truth":eng[i]['agent_as_a_point'],
-            "predicted": response['choices'][0]['message']['content'],
+            "predicted": response.choices[0].message.content,
             'world': eng[i]['world'],
-            'prompt_tokens': response['usage']['prompt_tokens'],
-            'gen_tokens': response['usage']['completion_tokens']
+            'prompt_tokens': response.usage.prompt_tokens,
+            'gen_tokens': response.usage.completion_tokens
         }
           
         out.append(test)
     
-    with open('outputs/'+ str(sys.argv[2]), 'w') as fo:
+    with open('outputs/'+ os.path.basename(str(sys.argv[2])), 'w') as fo:
       json_object = json.dumps(out, indent = 4)
       fo.write(json_object)
       fo.write('\n')
