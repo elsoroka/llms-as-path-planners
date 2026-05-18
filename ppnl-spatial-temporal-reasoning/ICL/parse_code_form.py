@@ -7,8 +7,8 @@ Each move_x(d) / move_y(d) call is expanded into d repeated action tokens:
   move_y(+d) -> "down"  * d
   move_y(-d) -> "up"    * d
 
-Calls with non-integer arguments (e.g. variables) are skipped, which will
-cause evaluation to fail — intentionally surfacing LLM mistakes.
+Each output record includes an "error" field: null on success, or a plain-English
+description of the first problem found — suitable for feeding back to the LLM.
 """
 import json
 import re
@@ -16,14 +16,58 @@ import sys
 
 
 def parse_response(response):
+    """
+    Parse move_x/move_y calls from the LLM response.
+    Returns (action_str, skipped) where skipped is a list of calls whose
+    arguments could not be parsed as integers (e.g. variables like N).
+    """
     actions = []
-    for axis, dist_str in re.findall(r'move_([xy])\((-?\d+)\)', response):
-        dist = int(dist_str)
+    skipped = []
+    for match in re.finditer(r'move_([xy])\(([^)]+)\)', response):
+        axis, arg = match.group(1), match.group(2).strip()
+        try:
+            dist = int(arg)
+        except ValueError:
+            skipped.append(f"move_{axis}({arg})")
+            continue
         if axis == 'x':
             actions.extend(['right' if dist > 0 else 'left'] * abs(dist))
         else:
             actions.extend(['down' if dist > 0 else 'up'] * abs(dist))
-    return ' '.join(actions)
+    return ' '.join(actions), skipped
+
+
+def check_path(world, actions_str):
+    """
+    Simulate the action sequence on the world grid.
+    Returns None on success, or a plain-English error string.
+    """
+    start = goal = None
+    for r, row in enumerate(world):
+        for c, val in enumerate(row):
+            if val == 2:
+                start = (r, c)
+            elif val == 3:
+                goal = (r, c)
+
+    actions = actions_str.split() if actions_str else []
+    if not actions:
+        return "No valid move_x/move_y calls parsed from response"
+
+    deltas = {'up': (-1, 0), 'down': (1, 0), 'left': (0, -1), 'right': (0, 1)}
+    pos = start
+    for i, action in enumerate(actions):
+        dr, dc = deltas[action]
+        r, c = pos[0] + dr, pos[1] + dc
+        if r < 0 or r >= len(world) or c < 0 or c >= len(world[0]):
+            return f"Out of bounds at step {i + 1}: tried to move to ({r}, {c})"
+        if world[r][c] == 1:
+            return f"Hit obstacle at step {i + 1}: ({r}, {c})"
+        pos = (r, c)
+
+    if pos != goal:
+        return f"Path ended at {pos} but goal is at {goal}"
+    return None
 
 
 def main():
@@ -34,20 +78,28 @@ def main():
     with open(sys.argv[1]) as f:
         records = [json.loads(line) for line in f]
 
-    out = [
-        {
+    out = []
+    for r in records:
+        actions, skipped = parse_response(r['response'])
+
+        if skipped:
+            error = f"Non-integer argument(s) in: {', '.join(skipped)}"
+        else:
+            error = check_path(r['world'], actions)
+
+        out.append({
             "english":      r['nl_description'],
             "ground_truth": r['ground_truth'],
-            "generated":    [parse_response(r['response'])],
+            "generated":    [actions],
             "world":        r['world'],
-        }
-        for r in records
-    ]
+            "error":        error,
+        })
 
     with open(sys.argv[2], 'w') as f:
         json.dump(out, f, indent=2)
 
-    print(f"Parsed {len(out)} samples -> {sys.argv[2]}")
+    n_errors = sum(1 for r in out if r['error'])
+    print(f"Parsed {len(out)} samples ({n_errors} errors) -> {sys.argv[2]}")
 
 
 if __name__ == '__main__':
