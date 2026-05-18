@@ -1,16 +1,21 @@
 """
-Evaluate all code-form output files in src/outputs/ and write a CSV summary.
+Evaluate code-form inference outputs and write a CSV summary.
+
+Works with outputs from both:
+  - gpt-4-path-planning/src/outputs/   (filenames: code_form_{geometry}_{split}_k{K}_{repr}.jsonl)
+  - ppnl-spatial-temporal-reasoning/ICL/outputs/  (filenames: code_form_k{K}_{testset}.jsonl)
+
+Reads directly from the raw *.jsonl files (re-parses move_x/move_y calls inline),
+so *_parsed.json intermediaries are not required.
 
 Usage:
     python eval_code_form.py [--outputs-dir DIR] [--out CSV]
 
-For each *_parsed.json file found, reads the matching *.jsonl for config metadata,
-computes aggregate metrics, and writes one row to the CSV.
-
 CSV columns:
-    file, geometry, split, representation, model, temperature, max_tries, max_samples,
+    file, geometry, split, grid_size, visibility, representation,
+    model, temperature, max_tries, max_samples,
     n_samples, n_success, success_rate, n_optimal, optimal_rate,
-    n_success_try_1 ... n_success_try_N  (per-try breakdown for multi-try runs)
+    n_success_try_1 ... n_success_try_N
 """
 
 import argparse
@@ -21,26 +26,157 @@ import sys
 from pathlib import Path
 
 
-def evaluate_records(records):
-    """Compute aggregate metrics from a list of parsed records."""
-    n = len(records)
+# ---------------------------------------------------------------------------
+# Inline parse logic (mirrors parse_code_form.py, no import needed)
+# ---------------------------------------------------------------------------
 
-    # Success: error field is null (path reached the goal without hitting obstacles)
-    successes = [r for r in records if r['error'] is None]
-    n_success = len(successes)
+def _parse_response(response):
+    """Extract move_x/move_y calls and expand to action tokens."""
+    actions = []
+    skipped = []
+    for match in re.finditer(r'move_([xy])\(([^)]+)\)', response):
+        axis, arg = match.group(1), match.group(2).strip()
+        try:
+            dist = int(arg)
+        except ValueError:
+            skipped.append(f"move_{axis}({arg})")
+            continue
+        if axis == 'x':
+            actions.extend(['right' if dist > 0 else 'left'] * abs(dist))
+        else:
+            actions.extend(['down' if dist > 0 else 'up'] * abs(dist))
+    return ' '.join(actions), skipped
 
-    # Optimal: succeeded AND path length equals the A*-optimal ground truth length
-    n_optimal = sum(
-        1 for r in successes
-        if len(r['generated'][0].split()) == len(r['ground_truth'].split())
+
+def _resolve(record):
+    """
+    Return (action_str, error, successful_try) for one raw jsonl record.
+    Handles both multi-try (attempts list) and legacy (single response) formats.
+    """
+    attempts = record.get('attempts', [])
+    if attempts:
+        for a in attempts:
+            if a['error'] is None:
+                actions, _ = _parse_response(a['response'])
+                return actions, None, a['try']
+        last = attempts[-1]
+        actions, _ = _parse_response(last['response'])
+        return actions, last['error'], None
+    # Legacy single-response format
+    response = record['response']
+    actions, skipped = _parse_response(response)
+    error = record.get('error') or (f"Non-integer arg(s): {skipped}" if skipped else None)
+    return actions, error, (1 if error is None else None)
+
+
+# ---------------------------------------------------------------------------
+# Metadata extraction
+# ---------------------------------------------------------------------------
+
+def _parse_filename(stem):
+    """
+    Try both known filename patterns and return a metadata dict.
+
+    gpt-4 pattern:  code_form_{geometry}_{split}_k{K}_{repr}
+    PPNL pattern:   code_form_k{K}_{testset_name}
+    """
+    # gpt-4-path-planning
+    m = re.match(
+        r'code_form_(?P<geometry>.+)_(?P<split>iid|ood)_k(?P<max_tries>\d+)'
+        r'_(?P<repr>text|code|grid)$',
+        stem,
     )
+    if m:
+        d = m.groupdict()
+        return {
+            'geometry':   d['geometry'],
+            'split':      d['split'],
+            'grid_size':  '',
+            'visibility': '',
+            'repr':       d['repr'],
+            'max_tries':  int(d['max_tries']),
+        }
 
-    # Per-try success counts (meaningful only for multi-try runs)
-    successful_tries = [r['successful_try'] for r in records if r['successful_try'] is not None]
-    max_try = max(successful_tries, default=1)
-    by_try = {t: successful_tries.count(t) for t in range(1, max_try + 1)}
+    # PPNL
+    m = re.match(r'code_form_k(?P<max_tries>\d+)_(?P<testset>.+)$', stem)
+    if m:
+        testset = m.group('testset')
+        grid    = (re.search(r'\d+x\d+(?:more_obstacles)?', testset) or re.search(r'', ''))
+        vis     = 'seen' if 'unseen' not in testset else 'unseen'
+        return {
+            'geometry':   '',
+            'split':      '',
+            'grid_size':  grid.group(0) if grid and grid.group(0) else '',
+            'visibility': vis,
+            'repr':       'text',   # PPNL code_form only uses text
+            'max_tries':  int(m.group('max_tries')),
+        }
 
+    return {'geometry': '', 'split': '', 'grid_size': '', 'visibility': '',
+            'repr': '', 'max_tries': ''}
+
+
+def _extract_config(config):
+    """Normalise config fields across argparse-dict and sys.argv-list formats."""
+    argv = config.get('argv', {})
+    if isinstance(argv, dict):
+        max_tries   = argv.get('max_tries', '')
+        max_samples = argv.get('max_samples', '')
+        repr_       = config.get('representation', argv.get('representation', ''))
+    else:
+        # sys.argv list: positional args vary; read max_tries from last positional if present
+        max_tries   = argv[-1] if len(argv) >= 5 else ''
+        max_samples = argv[3]  if len(argv) >= 4 else ''
+        repr_       = config.get('representation', '')
     return {
+        'model':       config.get('model', ''),
+        'temperature': config.get('temperature', ''),
+        'max_tries':   max_tries,
+        'max_samples': max_samples,
+        'repr':        repr_,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Evaluation
+# ---------------------------------------------------------------------------
+
+def _evaluate(jsonl_path):
+    """
+    Read a raw *.jsonl file and return (config, metrics).
+    Skips the config line; processes all sample lines.
+    """
+    with open(jsonl_path) as f:
+        lines = f.readlines()
+
+    config  = {}
+    records = []
+    for line in lines:
+        obj = json.loads(line)
+        if obj.get('_config'):
+            config = obj
+        else:
+            records.append(obj)
+
+    n           = len(records)
+    n_success   = 0
+    n_optimal   = 0
+    by_try      = {}
+
+    for rec in records:
+        actions, error, successful_try = _resolve(rec)
+        gt = rec.get('ground_truth', rec.get('path', ''))
+
+        if error is None:
+            n_success += 1
+            if len(actions.split()) == len(gt.split()):
+                n_optimal += 1
+            t = successful_try or 1
+            by_try[t] = by_try.get(t, 0) + 1
+
+    max_try = max(by_try, default=1)
+
+    metrics = {
         'n_samples':    n,
         'n_success':    n_success,
         'success_rate': n_success / n if n else 0.0,
@@ -49,27 +185,12 @@ def evaluate_records(records):
         'by_try':       by_try,
         'max_try':      max_try,
     }
+    return config, metrics
 
 
-def load_config(jsonl_path):
-    """Read the first (config) line from a raw inference JSONL file."""
-    with open(jsonl_path) as f:
-        first = json.loads(f.readline())
-    return first if first.get('_config') else {}
-
-
-def parse_filename(stem):
-    """
-    Extract geometry, split, max_tries, representation from output filename stem.
-    Expected pattern: code_form_{geometry}_{split}_k{max_tries}_{repr}
-    """
-    m = re.match(
-        r'code_form_(?P<geometry>.+)_(?P<split>iid|ood)_k(?P<max_tries>\d+)'
-        r'_(?P<repr>text|code|grid)$',
-        stem,
-    )
-    return m.groupdict() if m else {}
-
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
@@ -79,7 +200,7 @@ def main():
         '--outputs-dir',
         default=Path(__file__).parent / 'outputs',
         type=Path,
-        help="Directory containing *_parsed.json files (default: src/outputs/).",
+        help="Directory containing *.jsonl output files (default: src/outputs/).",
     )
     parser.add_argument(
         '--out',
@@ -92,43 +213,45 @@ def main():
     out_dir  = args.outputs_dir
     csv_path = args.out or out_dir / 'results.csv'
 
-    parsed_files = sorted(out_dir.glob('*_parsed.json'))
-    if not parsed_files:
-        print(f"No *_parsed.json files found in {out_dir}", file=sys.stderr)
+    # Find raw inference files; skip test/smoke files without a config pattern
+    jsonl_files = sorted(
+        p for p in out_dir.glob('*.jsonl')
+        if re.match(r'code_form_', p.stem)
+    )
+    if not jsonl_files:
+        print(f"No code_form_*.jsonl files found in {out_dir}", file=sys.stderr)
         sys.exit(1)
 
-    rows = []
+    rows           = []
     max_try_global = 1
 
-    for parsed_path in parsed_files:
-        stem      = parsed_path.stem.removesuffix('_parsed')
-        raw_path  = out_dir / f'{stem}.jsonl'
-        fn_info   = parse_filename(stem)
-
-        records = json.loads(parsed_path.read_text())
-        config  = load_config(raw_path) if raw_path.exists() else {}
-        argv    = config.get('argv', {})
-        metrics = evaluate_records(records)
+    for jsonl_path in jsonl_files:
+        stem     = jsonl_path.stem
+        fn_info  = _parse_filename(stem)
+        config, metrics = _evaluate(jsonl_path)
+        cfg      = _extract_config(config)
 
         max_try_global = max(max_try_global, metrics['max_try'])
 
         row = {
             'file':           stem,
-            'geometry':       fn_info.get('geometry', ''),
-            'split':          fn_info.get('split', ''),
-            'representation': config.get('representation', fn_info.get('repr', '')),
-            'model':          config.get('model', ''),
-            'temperature':    config.get('temperature', ''),
-            'max_tries':      argv.get('max_tries', fn_info.get('max_tries', '')),
-            'max_samples':    argv.get('max_samples', ''),   # blank = full dataset
+            'geometry':       fn_info['geometry'],
+            'split':          fn_info['split'],
+            'grid_size':      fn_info['grid_size'],
+            'visibility':     fn_info['visibility'],
+            'representation': cfg['repr'] or fn_info['repr'],
+            'model':          cfg['model'],
+            'temperature':    cfg['temperature'],
+            'max_tries':      cfg['max_tries'] or fn_info['max_tries'],
+            'max_samples':    cfg['max_samples'],
             'n_samples':      metrics['n_samples'],
             'n_success':      metrics['n_success'],
             'success_rate':   round(metrics['success_rate'], 4),
             'n_optimal':      metrics['n_optimal'],
             'optimal_rate':   round(metrics['optimal_rate'], 4),
         }
-        for t, n in metrics['by_try'].items():
-            row[f'n_success_try_{t}'] = n
+        for t, cnt in metrics['by_try'].items():
+            row[f'n_success_try_{t}'] = cnt
 
         rows.append(row)
         print(
@@ -139,9 +262,8 @@ def main():
             f"({metrics['optimal_rate']:.1%})"
         )
 
-    # Fixed columns first, then per-try columns up to the global maximum
     fixed_fields = [
-        'file', 'geometry', 'split', 'representation',
+        'file', 'geometry', 'split', 'grid_size', 'visibility', 'representation',
         'model', 'temperature', 'max_tries', 'max_samples',
         'n_samples', 'n_success', 'success_rate', 'n_optimal', 'optimal_rate',
     ]
