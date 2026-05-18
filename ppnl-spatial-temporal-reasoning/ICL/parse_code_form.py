@@ -112,6 +112,10 @@ def main():
     with open(sys.argv[1]) as f:
         records = [json.loads(line) for line in f]
 
+    # Separate config line (if present) from sample records.
+    config = next((r for r in records if r.get('_config')), None)
+    records = [r for r in records if not r.get('_config')]
+
     out = []
     for r in records:
         response, error, successful_try = _resolve_attempt(r)

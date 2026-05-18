@@ -120,6 +120,13 @@ def main():
 
     print(f"Running with max_tries={max_tries} on {len(data)} samples.")
 
+    config = {
+        "_config": True,
+        "model":       "gpt-4",
+        "temperature": 0.0,
+        "argv":        sys.argv,
+    }
+
     results = []
     for i, sample in enumerate(data):
         print(f"\n--- Sample {i} ---")
@@ -172,7 +179,9 @@ def main():
         results.append(result)
 
         # Write after each sample so progress is not lost on interruption.
+        # Config line is always first so the file is self-identifying.
         with open(output_file, 'w') as f:
+            f.write(json.dumps(config) + '\n')
             for r in results:
                 f.write(json.dumps(r) + '\n')
 
