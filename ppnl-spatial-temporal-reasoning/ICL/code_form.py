@@ -4,6 +4,7 @@ import time
 import sys
 from openai import OpenAI
 from dotenv import load_dotenv
+from parse_code_form import parse_response, check_path
 
 load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -56,63 +57,121 @@ def build_prompt(nl_description: str) -> str:
     )
 
 
+def build_feedback_message(error: str) -> str:
+    """Feedback message appended to the conversation when a solution is wrong."""
+    return (
+        f"That solution is incorrect.\n"
+        f"Error: {error}\n"
+        "Please write a corrected solve() function.\n"
+        "```python\n"
+    )
+
+
+def call_api(messages: list) -> str:
+    """Call the OpenAI API with one retry on failure."""
+    for attempt in range(2):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=0.0,
+                max_tokens=300,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if attempt == 0:
+                print(f"API error: {e}. Retrying in 25s...")
+                time.sleep(25)
+            else:
+                raise
+
+
 def main():
     """
     Usage:
-        python code_form.py <test_json> <output_jsonl> [max_samples]
+        python code_form.py <test_json> <output_jsonl> [max_samples [max_tries]]
 
-    Outputs one JSON object per line:
-        { "id": int, "prompt": str, "response": str,
-          "ground_truth": str, "nl_description": str, "world": list }
+    max_tries controls how many inference rounds per sample (default 1).
+    On each failed attempt the LLM receives its previous response plus a
+    plain-English error description and is asked to correct the solution.
+
+    Each output record (one JSON line) contains:
+        { "id": int, "nl_description": str, "ground_truth": str, "world": list,
+          "attempts": [{"try": int, "prompt": str, "response": str,
+                        "error": str|null}, ...] }
+
+    "prompt" for try 1 is the full initial prompt.
+    "prompt" for tries 2+ is just the feedback message added in that turn
+    (the full conversation is reconstructable from all attempts).
     """
     if len(sys.argv) < 3:
-        print("Usage: python code_form.py <test_json> <output_jsonl> [max_samples]")
+        print("Usage: python code_form.py <test_json> <output_jsonl> "
+              "[max_samples [max_tries]]")
         sys.exit(1)
 
-    test_file = sys.argv[1]
+    test_file   = sys.argv[1]
     output_file = sys.argv[2]
-    max_samples = int(sys.argv[3]) if len(sys.argv) > 3 else None
+    max_samples = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] else None
+    max_tries   = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else 1
 
     data = json.load(open(test_file))
     if max_samples is not None:
         data = data[:max_samples]
 
+    print(f"Running with max_tries={max_tries} on {len(data)} samples.")
+
     results = []
     for i, sample in enumerate(data):
         print(f"\n--- Sample {i} ---")
-        prompt = build_prompt(sample['nl_description'])
-        print(prompt)
+        initial_prompt = build_prompt(sample['nl_description'])
 
-        for attempt in range(2):
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,
-                    max_tokens=300
-                )
+        # Build the message history for this sample; grows on retries.
+        messages = [{"role": "user", "content": initial_prompt}]
+        attempts = []
+
+        for try_num in range(1, max_tries + 1):
+            logged_prompt = messages[-1]["content"]
+            print(f"  [Try {try_num}] Prompt:\n{logged_prompt}")
+
+            raw = call_api(messages)
+            print(f"  [Try {try_num}] Response:\n{raw}")
+
+            # Parse inline so we can provide error feedback on the next turn.
+            actions, skipped = parse_response(raw)
+            if skipped:
+                error = f"Non-integer argument(s) in: {', '.join(skipped)}"
+            else:
+                error = check_path(sample['world'], actions)
+
+            attempts.append({
+                "try":      try_num,
+                "prompt":   logged_prompt,
+                "response": raw,
+                "error":    error,
+            })
+
+            if error is None:
+                print(f"  [Try {try_num}] Success!")
                 break
-            except Exception as e:
-                if attempt == 0:
-                    print(f"API error: {e}. Retrying in 25s...")
-                    time.sleep(25)
-                else:
-                    raise
 
-        raw = response.choices[0].message.content
-        print("Response:", raw)
+            print(f"  [Try {try_num}] Error: {error}")
+            if try_num < max_tries:
+                # Extend conversation: assistant sends its (wrong) code,
+                # user sends the error feedback.
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({"role": "user",
+                                  "content": build_feedback_message(error)})
 
         result = {
-            "id": i,
-            "prompt": prompt,
-            "response": raw,
-            "ground_truth": sample['agent_as_a_point'],
+            "id":             i,
             "nl_description": sample['nl_description'],
-            "world": sample['world'],
+            "ground_truth":   sample['agent_as_a_point'],
+            "world":          sample['world'],
+            "attempts":       attempts,
         }
         results.append(result)
 
-        # Write after each sample so progress is not lost on interruption
+        # Write after each sample so progress is not lost on interruption.
         with open(output_file, 'w') as f:
             for r in results:
                 f.write(json.dumps(r) + '\n')

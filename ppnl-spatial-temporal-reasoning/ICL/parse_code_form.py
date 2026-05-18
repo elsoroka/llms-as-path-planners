@@ -7,8 +7,14 @@ Each move_x(d) / move_y(d) call is expanded into d repeated action tokens:
   move_y(+d) -> "down"  * d
   move_y(-d) -> "up"    * d
 
-Each output record includes an "error" field: null on success, or a plain-English
-description of the first problem found — suitable for feeding back to the LLM.
+Supports both output formats from code_form.py:
+  - Legacy (single attempt): record has a top-level "response" field.
+  - Multi-try: record has an "attempts" list; the first attempt whose
+    "error" is null is used. If all failed the last attempt is used.
+
+Each output record includes:
+  "error":          null on success, or a plain-English error description.
+  "successful_try": 1-based try number that succeeded, or null if all failed.
 """
 import json
 import re
@@ -70,6 +76,34 @@ def check_path(world, actions_str):
     return None
 
 
+def _resolve_attempt(r):
+    """
+    Return (response_str, error_str_or_None, successful_try_or_None)
+    for a single record, handling both legacy and multi-try formats.
+    """
+    attempts = r.get('attempts')
+
+    if attempts:
+        # Multi-try format: pick first successful attempt, or last if all failed.
+        for a in attempts:
+            if a['error'] is None:
+                return a['response'], None, a['try']
+        # All failed — use last attempt (error is already stored).
+        last = attempts[-1]
+        return last['response'], last['error'], None
+
+    else:
+        # Legacy single-response format.
+        response = r['response']
+        actions, skipped = parse_response(response)
+        if skipped:
+            error = f"Non-integer argument(s) in: {', '.join(skipped)}"
+        else:
+            error = check_path(r['world'], actions)
+        successful_try = 1 if error is None else None
+        return response, error, successful_try
+
+
 def main():
     if len(sys.argv) != 3:
         print("Usage: python parse_code_form.py <input.jsonl> <output.json>")
@@ -80,19 +114,16 @@ def main():
 
     out = []
     for r in records:
-        actions, skipped = parse_response(r['response'])
-
-        if skipped:
-            error = f"Non-integer argument(s) in: {', '.join(skipped)}"
-        else:
-            error = check_path(r['world'], actions)
+        response, error, successful_try = _resolve_attempt(r)
+        actions, _ = parse_response(response)
 
         out.append({
-            "english":      r['nl_description'],
-            "ground_truth": r['ground_truth'],
-            "generated":    [actions],
-            "world":        r['world'],
-            "error":        error,
+            "english":        r['nl_description'],
+            "ground_truth":   r['ground_truth'],
+            "generated":      [actions],
+            "world":          r['world'],
+            "error":          error,
+            "successful_try": successful_try,
         })
 
     with open(sys.argv[2], 'w') as f:
@@ -100,6 +131,18 @@ def main():
 
     n_errors = sum(1 for r in out if r['error'])
     print(f"Parsed {len(out)} samples ({n_errors} errors) -> {sys.argv[2]}")
+
+    # Per-try success breakdown (only meaningful for multi-try runs).
+    max_try = max(
+        (max(a['try'] for a in r['attempts']) for r in records if r.get('attempts')),
+        default=1,
+    )
+    if max_try > 1:
+        print("Success breakdown by try:")
+        for t in range(1, max_try + 1):
+            n = sum(1 for r in out if r['successful_try'] == t)
+            print(f"  Try {t}: {n}")
+        print(f"  Failed all: {sum(1 for r in out if r['successful_try'] is None)}")
 
 
 if __name__ == '__main__':
