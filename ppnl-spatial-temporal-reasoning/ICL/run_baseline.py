@@ -4,7 +4,7 @@
 Replicates the original gpt4.py method from the paper:
   - Model:       gpt-4
   - Temperature: 0.0
-  - Max tokens:  250
+  - Max tokens:  1024
   - Prompt:      prompts/few-shot-prompts-single_goal_5.txt  (5 examples)
 
 Usage:
@@ -31,7 +31,7 @@ load_dotenv()
 PROMPT_FILE = Path(__file__).parent / 'prompts' / 'few-shot-prompts-single_goal_5.txt'
 DEFAULT_MODEL = 'gpt-4'
 TEMPERATURE   = 0.0
-MAX_TOKENS    = 250
+MAX_TOKENS    = 1024
 
 
 def load_prompt_template():

@@ -76,7 +76,7 @@ def call_api(client: OpenAI, model: str, messages: list) -> str:
                 model=model,
                 messages=messages,
                 temperature=0.0,
-                max_tokens=300,
+                max_tokens=1024,
                 extra_body=extra_body,
             )
             return strip_thinking(response.choices[0].message.content)

@@ -34,10 +34,12 @@ def vllm_extra_body(model: str) -> dict | None:
     Return an extra_body dict to pass to the vLLM API for the given model,
     or None if no extra configuration is needed.
 
-    Currently disables the built-in chain-of-thought for Qwen3 models, which
-    otherwise consume most of the token budget on reasoning before answering.
+    Currently disables the built-in chain-of-thought for Qwen3 and DeepSeek
+    reasoning models, which otherwise consume most of the token budget on
+    reasoning before answering.
     """
-    if "qwen" in model.lower():
+    m = model.lower()
+    if "qwen" in m or "deepseek" in m:
         return {"chat_template_kwargs": {"enable_thinking": False}}
     return None
 

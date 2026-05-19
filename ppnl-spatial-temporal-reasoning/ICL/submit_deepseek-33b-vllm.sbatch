@@ -19,7 +19,8 @@ conda activate /scratch/m000186/esoroka/
 vllm serve "deepseek-ai/deepseek-coder-33b-instruct" --port 8000 \
       --tensor-parallel-size 4 \
       --gpu-memory-utilization 0.95 \
-      --max-model-len 32768 &
+      --max-model-len 32768 \
+      --enforce-eager &
 
 echo "Waiting for vLLM to be ready..."
 until curl -s http://localhost:8000/health > /dev/null 2>&1; do
