@@ -1,7 +1,8 @@
 """
-Plot k7 code-form results from the PPNL benchmark.
+Plot PPNL benchmark results: code-form (k=7) vs 5-shot ICL baseline.
 
-Produces a two-panel figure (success rate | optimal rate) saved as a PDF.
+Produces a two-panel figure (success rate | optimal rate) with grouped bars
+(one group per test set, two bars per group), saved as a PDF.
 
 Usage:
     python plot_code_form.py [--results CSV] [--out PDF]
@@ -14,79 +15,89 @@ from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 from matplotlib.backends.backend_pdf import PdfPages
+import numpy as np
 
 # ---------------------------------------------------------------------------
-# Map raw file stems to clean x-axis labels and a canonical sort order
+# Canonical test-set ordering and display labels
+# (keyed by the testset suffix shared by both methods)
 # ---------------------------------------------------------------------------
-LABEL_MAP = {
-    'code_form_k7_1_goals_test_unseen_5x5_samples':             ('5×5\nunseen',      0),
-    'code_form_k7_1_goals_test_seen_6x6_samples':               ('6×6\nseen',        1),
-    'code_form_k7_1goals_unseen_6x6_samples':                   ('6×6\nunseen',      2),
-    'code_form_k7_1_goals_test_unseen_6x6more_obstacles_samples':('6×6+obs\nunseen', 3),
-    'code_form_k7_1_goals_test_unseen_7x7_samples':             ('7×7\nunseen',      4),
-}
-
-# Each bar gets a distinct color + hatch so it reads in B&W
-STYLES = [
-    {'color': '#4878CF', 'hatch': ''},
-    {'color': '#6ACC65', 'hatch': '///'},
-    {'color': '#D65F5F', 'hatch': '...'},
-    {'color': '#B47CC7', 'hatch': 'xxx'},
-    {'color': '#C4AD66', 'hatch': '\\\\\\'},
+TESTSETS = [
+    ('1_goals_test_unseen_5x5_samples',              '5×5\nunseen'),
+    ('1_goals_test_seen_6x6_samples',                '6×6\nseen'),
+    ('1goals_unseen_6x6_samples',                    '6×6\nunseen'),
+    ('1_goals_test_unseen_6x6more_obstacles_samples','6×6+obs\nunseen'),
+    ('1_goals_test_unseen_7x7_samples',              '7×7\nunseen'),
 ]
 
+# Method styles — distinct color + hatch for B&W legibility
+METHODS = [
+    {
+        'key':    '5-shot baseline',
+        'prefix': 'baseline_5shot_',
+        'color':  '#AAAAAA',
+        'hatch':  '///',
+    },
+    {
+        'key':    'Code-form (k=7)',
+        'prefix': 'code_form_k7_',
+        'color':  '#4878CF',
+        'hatch':  'xxx',
+    },
+]
 
-def load_k7_rows(csv_path):
+BAR_WIDTH = 0.35
+
+
+def load_data(csv_path):
+    """Return {stem: {success_rate, optimal_rate}} for all rows."""
     with open(csv_path) as f:
-        rows = [r for r in csv.DictReader(f) if 'k7' in r['file']]
-
-    entries = []
-    for r in rows:
-        stem = r['file']
-        if stem not in LABEL_MAP:
-            continue
-        label, order = LABEL_MAP[stem]
-        entries.append({
-            'label':        label,
-            'order':        order,
-            'success_rate': float(r['success_rate']),
-            'optimal_rate': float(r['optimal_rate']),
-            'n_samples':    int(r['n_samples']),
-        })
-    entries.sort(key=lambda x: x['order'])
-    return entries
+        return {r['file']: r for r in csv.DictReader(f)}
 
 
-def make_bar_panel(ax, entries, metric_key, title, ylabel):
-    labels  = [e['label']       for e in entries]
-    values  = [e[metric_key]    for e in entries]
-    n       = len(entries)
+def make_panel(ax, rows, testsets, metric_key, title, ylabel):
+    n_groups  = len(testsets)
+    n_methods = len(METHODS)
+    offsets   = np.linspace(-(n_methods - 1) / 2, (n_methods - 1) / 2, n_methods) * BAR_WIDTH
+    x         = np.arange(n_groups)
 
-    for i, (val, style) in enumerate(zip(values, STYLES)):
-        ax.bar(
-            i, val,
-            color=style['color'],
-            hatch=style['hatch'],
+    for method, offset in zip(METHODS, offsets):
+        values = []
+        for testset_key, _ in testsets:
+            stem = method['prefix'] + testset_key
+            row  = rows.get(stem)
+            values.append(float(row[metric_key]) if row else 0.0)
+
+        bars = ax.bar(
+            x + offset, values,
+            width=BAR_WIDTH,
+            label=method['key'],
+            color=method['color'],
+            hatch=method['hatch'],
             edgecolor='black',
             linewidth=0.8,
-            width=0.6,
-            label=labels[i],
         )
-        # Value label above each bar
-        ax.text(i, val + 0.01, f'{val:.0%}', ha='center', va='bottom',
-                fontsize=12, fontweight='bold')
+        for bar, val in zip(bars, values):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                val + 0.01,
+                f'{val:.0%}',
+                ha='center', va='bottom',
+                fontsize=10, fontweight='bold',
+            )
 
-    ax.set_xticks(range(n))
-    ax.set_xticklabels(labels, fontsize=13)
+    ax.set_xticks(x)
+    ax.set_xticklabels([label for _, label in testsets], fontsize=13)
     ax.set_ylabel(ylabel, fontsize=14)
     ax.set_title(title, fontsize=16, fontweight='bold', pad=10)
-    ax.set_ylim(0, 1.12)
+    ax.set_ylim(0, 1.18)
     ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1))
     ax.tick_params(axis='y', labelsize=12)
     ax.spines[['top', 'right']].set_visible(False)
     ax.grid(axis='y', linestyle='--', linewidth=0.6, alpha=0.6)
     ax.set_axisbelow(True)
+    ax.legend(fontsize=12, framealpha=0.9)
 
 
 def main():
@@ -103,22 +114,18 @@ def main():
     )
     args = parser.parse_args()
 
-    entries = load_k7_rows(args.results)
-    if not entries:
-        raise SystemExit("No k7 rows found in results CSV.")
+    rows = load_data(args.results)
 
     fig, (ax_success, ax_optimal) = plt.subplots(
-        1, 2, figsize=(13, 5), constrained_layout=True
+        1, 2, figsize=(14, 5.5), constrained_layout=True
     )
 
-    make_bar_panel(ax_success, entries,
-                   'success_rate', 'Success Rate', 'Success rate')
-    make_bar_panel(ax_optimal,  entries,
-                   'optimal_rate', 'Optimal Rate', 'Optimal rate')
+    make_panel(ax_success, rows, TESTSETS, 'success_rate', 'Success Rate', 'Success rate')
+    make_panel(ax_optimal,  rows, TESTSETS, 'optimal_rate', 'Optimal Rate', 'Optimal rate')
 
     fig.suptitle(
-        'Code-form planning on PPNL benchmark (GPT-4, k=7)',
-        fontsize=17, fontweight='bold',
+        'PPNL benchmark: code-form (k=7) vs 5-shot ICL baseline  (GPT-4)',
+        fontsize=16, fontweight='bold',
     )
 
     with PdfPages(args.out) as pdf:
