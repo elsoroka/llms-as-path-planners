@@ -130,7 +130,7 @@ def main():
         help="Limit number of samples processed (default: all).",
     )
     parser.add_argument(
-        "--provider", choices=["openai", "vllm"], default="openai",
+        "--provider", choices=["openai", "vllm", "stanford"], default="openai",
         help="Model provider (default: openai).",
     )
     parser.add_argument(
@@ -159,6 +159,11 @@ def main():
         if args.launch_vllm:
             launch_vllm_server(args.model, args.base_url, args.tensor_parallel_size)
         client = OpenAI(api_key="EMPTY", base_url=args.base_url)
+    elif args.provider == "stanford":
+        client = OpenAI(
+            api_key=os.environ.get("STANFORD_API_KEY"),
+            base_url="https://aiapi-prod.stanford.edu/v1",
+        )
     else:
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 

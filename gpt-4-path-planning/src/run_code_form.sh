@@ -26,8 +26,8 @@ DATA_DIR="$SCRIPT_DIR/../data"
 OUT_DIR="$SCRIPT_DIR/outputs"
 
 # --- Defaults ---
-REPR="text"
-MAX_SAMPLES_ARG=""
+REPR="code"
+MAX_SAMPLES_ARG=100
 MAX_TRIES=7
 
 # --- Argument parsing ---
@@ -63,7 +63,7 @@ for entry in "${TEST_SETS[@]}"; do
     python "$SCRIPT_DIR/code_form.py" "$input" "$raw" \
         --representation "$REPR" \
         --max-tries "$MAX_TRIES" \
-        $MAX_SAMPLES_ARG
+        --max-samples $MAX_SAMPLES_ARG
 
     python "$SCRIPT_DIR/parse_code_form.py" "$raw" "$parsed"
     echo

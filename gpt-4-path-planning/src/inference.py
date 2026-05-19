@@ -111,7 +111,7 @@ def main():
     # Parse provider/model args from the tail of argv, leaving positional
     # sys.argv indices intact for the existing logic below.
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--provider", choices=["openai", "vllm"], default="openai")
+    parser.add_argument("--provider", choices=["openai", "vllm", "stanford"], default="openai")
     parser.add_argument("--model", default=None,
                         help="Model name. For --provider vllm, use the HuggingFace "
                              "model name (e.g. deepseek-ai/deepseek-moe-16b-chat).")
@@ -132,6 +132,12 @@ def main():
         if known.launch_vllm:
             launch_vllm_server(_model, known.base_url, known.tensor_parallel_size)
         client = OpenAI(api_key="EMPTY", base_url=known.base_url)
+    elif known.provider == "stanford":
+        client = OpenAI(
+            api_key=os.environ.get("STANFORD_API_KEY"),
+            base_url="https://aiapi-prod.stanford.edu/v1",
+        )
+        _model = known.model or "llama-3.2"
     else:
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         _model = known.model or "gpt-4-turbo"
@@ -150,8 +156,6 @@ def main():
 
     if(choice == 'env_from_file'):
 
-        res_iid = []
-        res_ood = []
         iid_file = open(sys.argv[4])
         ood_file = open(sys.argv[5])
 
@@ -163,12 +167,32 @@ def main():
         n_environments = int(sys.argv[6]) if len(sys.argv) > 6 else 30
         valid = {}
         for id_ in grouped.keys():
-           print(len(grouped[id_]['OOD']))         
+           print(len(grouped[id_]['OOD']))
            if(len(grouped[id_]['OOD']) < 4):
                continue
            valid[id_] = grouped[id_]
-        
-        for id_ in list(valid.keys())[:n_environments]:
+
+        # Determine output paths before the loop so we can resume.
+        grid_size = len(iid_data[0]['world']) if iid_data else 25
+        iid_out_path = f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_iid_fewShot_{grid_size}x{grid_size}.json'
+        ood_out_path = f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_ood_fewShot_{grid_size}x{grid_size}.json'
+
+        # Load existing results to enable resuming interrupted runs.
+        res_iid = []
+        res_ood = []
+        if os.path.exists(iid_out_path) and os.path.exists(ood_out_path):
+            with open(iid_out_path) as f:
+                res_iid = json.load(f)
+            with open(ood_out_path) as f:
+                res_ood = json.load(f)
+            print(f"Resuming: skipping first {len(res_iid)} environments already in output file.")
+
+        already_done = len(res_iid)
+
+        for env_idx, id_ in enumerate(list(valid.keys())[:n_environments]):
+           if env_idx < already_done:
+               continue
+
            print(f'Processing environment {id_}')
            test_samples = 5
 
@@ -176,7 +200,7 @@ def main():
            ood_values = VALS_OOD[geometry]
 
            count = {}
-           
+
            test_iid = []
            for x in grouped[id_]['IID']:
                vv = len(x['path'].split())
@@ -190,8 +214,8 @@ def main():
            for x in grouped[id_]['IID']:
                if(x not in test_iid):
                    train.append(x)
-           
-           test_ood = grouped[id_]['OOD'] 
+
+           test_ood = grouped[id_]['OOD']
 
            if(representation == 'Grid'):
                 res_iid.append(few_shot_inference(train, test_iid, 5, 'Grid'))
@@ -199,29 +223,24 @@ def main():
 
            if(representation == 'Code'):
                 res_iid.append(few_shot_inference(train, test_iid, 5, 'Code'))
-                res_ood.append(few_shot_inference(train, test_ood, 5, 'Code')) 
+                res_ood.append(few_shot_inference(train, test_ood, 5, 'Code'))
 
            if('AE' in representation):
                 res_iid.append(few_shot_inference(train, test_iid, 5, representation))
-                res_ood.append(few_shot_inference(train, test_ood, 5, representation)) 
-           
+                res_ood.append(few_shot_inference(train, test_ood, 5, representation))
+
            if(representation == 'Naive'):
                 res_iid.append(few_shot_inference(train, test_iid, 5, 'Naive'))
-                res_ood.append(few_shot_inference(train, test_ood, 5, 'Naive'))  
+                res_ood.append(few_shot_inference(train, test_ood, 5, 'Naive'))
 
-           # Determine grid size from the data
-           grid_size = len(iid_data[0]['world']) if iid_data else 25
-           
-           with open(f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_iid_fewShot_{grid_size}x{grid_size}.json', 'w') as f:
+           with open(iid_out_path, 'w') as f:
                 obj = json.dumps(res_iid, indent=4)
                 f.write(obj)
-           with open(f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_ood_fewShot_{grid_size}x{grid_size}.json', 'w') as f:
+           with open(ood_out_path, 'w') as f:
                 obj = json.dumps(res_ood, indent=4)
                 f.write(obj)
 
     if(choice == 'decompose'):
-            res_iid = []
-            res_ood = []
             iid_file = open(sys.argv[4])
             ood_file = open(sys.argv[5])
             max_size = int(sys.argv[6])
@@ -229,7 +248,7 @@ def main():
             iid_data = json.load(iid_file)
             ood_data = json.load(ood_file)
 
-            grouped =  group_environments(data=iid_data + ood_data, geometry=geometry)            
+            grouped =  group_environments(data=iid_data + ood_data, geometry=geometry)
 
             n_environments = 30
             valid = {}
@@ -237,8 +256,28 @@ def main():
                 if(len(grouped[id_]['OOD']) < 5):
                     continue
                 valid[id_] = grouped[id_]
-            
-            for id_ in list(valid.keys())[:n_environments]:
+
+            # Determine output paths before the loop so we can resume.
+            grid_size = len(iid_data[0]['world']) if iid_data else 25
+            iid_out_path = f'../outputs/{choice}_out_5_shot_{geometry}_{representation}_iid_fewShot_{grid_size}x{grid_size}.json'
+            ood_out_path = f'../outputs/{choice}_out_5_shot_{geometry}_{representation}_ood_fewShot_{grid_size}x{grid_size}.json'
+
+            # Load existing results to enable resuming interrupted runs.
+            res_iid = []
+            res_ood = []
+            if os.path.exists(iid_out_path) and os.path.exists(ood_out_path):
+                with open(iid_out_path) as f:
+                    res_iid = json.load(f)
+                with open(ood_out_path) as f:
+                    res_ood = json.load(f)
+                print(f"Resuming: skipping first {len(res_iid)} environments already in output file.")
+
+            already_done = len(res_iid)
+
+            for env_idx, id_ in enumerate(list(valid.keys())[:n_environments]):
+                if env_idx < already_done:
+                    continue
+
                 print(f'Processing environment {id_}')
                 test_samples = 5
 
@@ -246,7 +285,7 @@ def main():
                 ood_values = VALS_OOD[geometry]
 
                 count = {}
-                
+
                 test_iid = []
                 for x in grouped[id_]['IID']:
                     vv = len(x['path'].split())
@@ -260,8 +299,8 @@ def main():
                 for x in grouped[id_]['IID']:
                     if(x not in test_iid):
                         train.append(x)
-                
-                test_ood = grouped[id_]['OOD'] 
+
+                test_ood = grouped[id_]['OOD']
 
                 decomposed_iid = []
                 decomposed_ood = []
@@ -292,7 +331,7 @@ def main():
                         for instance in test_ood:
                             compositions, _ = decompose_sample(instance, max_len=max_size, geometry=geometry)
                             decomposed_ood.append(few_shot_inference(train, compositions, 5, 'AE'))
-                            
+
                         res_iid.append(decomposed_iid)
                         res_ood.append(decomposed_ood)
 
@@ -303,18 +342,14 @@ def main():
                         for instance in test_ood:
                             compositions, _ = decompose_sample(instance, max_len=max_size, geometry=geometry)
                             decomposed_ood.append(few_shot_inference(train, compositions, 5,'Naive'))
-                            
+
                         res_iid.append(decomposed_iid)
                         res_ood.append(decomposed_ood)
 
-
-                # Determine grid size from the data
-                grid_size = len(iid_data[0]['world']) if iid_data else 25
-                
-                with open(f'../outputs/{choice}_out_5_shot_{geometry}_{representation}_iid_fewShot_{grid_size}x{grid_size}.json', 'w') as f:
+                with open(iid_out_path, 'w') as f:
                         obj = json.dumps(res_iid, indent=4)
                         f.write(obj)
-                with open(f'../outputs/{choice}_out_5_shot_{geometry}_{representation}_ood_fewShot_{grid_size}x{grid_size}.json', 'w') as f:
+                with open(ood_out_path, 'w') as f:
                         obj = json.dumps(res_ood, indent=4)
                         f.write(obj)
 
