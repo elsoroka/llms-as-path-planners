@@ -1,13 +1,13 @@
+import argparse
 import os
 import json
 import time
-import sys
 from openai import OpenAI
 from dotenv import load_dotenv
 from parse_code_form import parse_response, check_path
+from vllm_utils import launch_vllm_server
 
 load_dotenv()
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 # One-shot example task and solution (same environment used in the 5-shot baseline prompt)
 ONE_SHOT_TASK = (
@@ -67,12 +67,12 @@ def build_feedback_message(error: str) -> str:
     )
 
 
-def call_api(messages: list) -> str:
-    """Call the OpenAI API with one retry on failure."""
+def call_api(client: OpenAI, model: str, messages: list) -> str:
+    """Call the API with one retry on failure."""
     for attempt in range(2):
         try:
             response = client.chat.completions.create(
-                model="gpt-4",
+                model=model,
                 messages=messages,
                 temperature=0.0,
                 max_tokens=300,
@@ -88,13 +88,6 @@ def call_api(messages: list) -> str:
 
 def main():
     """
-    Usage:
-        python code_form.py <test_json> <output_jsonl> [max_samples [max_tries]]
-
-    max_tries controls how many inference rounds per sample (default 1).
-    On each failed attempt the LLM receives its previous response plus a
-    plain-English error description and is asked to correct the solution.
-
     Each output record (one JSON line) contains:
         { "id": int, "nl_description": str, "ground_truth": str, "world": list,
           "attempts": [{"try": int, "prompt": str, "response": str,
@@ -104,27 +97,69 @@ def main():
     "prompt" for tries 2+ is just the feedback message added in that turn
     (the full conversation is reconstructable from all attempts).
     """
-    if len(sys.argv) < 3:
-        print("Usage: python code_form.py <test_json> <output_jsonl> "
-              "[max_samples [max_tries]]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Code-form one-shot inference for PPNL single-goal benchmark."
+    )
+    parser.add_argument("test_json",    help="Input JSON file (list of samples).")
+    parser.add_argument("output_jsonl", help="Output JSONL file.")
+    parser.add_argument(
+        "--max-samples", type=int, default=None,
+        help="Limit number of samples processed (default: all).",
+    )
+    parser.add_argument(
+        "--max-tries", type=int, default=1,
+        help="Max inference rounds per sample with error feedback (default: 1).",
+    )
+    parser.add_argument(
+        "--provider", choices=["openai", "vllm"], default="openai",
+        help="Model provider (default: openai).",
+    )
+    parser.add_argument(
+        "--model", default="gpt-4",
+        help="Model name. For --provider vllm, use the HuggingFace model name "
+             "(e.g. deepseek-ai/deepseek-moe-16b-chat). Default: %(default)s.",
+    )
+    parser.add_argument(
+        "--base-url", default="http://localhost:8000/v1",
+        help="Base URL for the vLLM OpenAI-compatible endpoint (only used with "
+             "--provider vllm). Default: %(default)s.",
+    )
+    parser.add_argument(
+        "--tensor-parallel-size", type=int, default=1,
+        help="Number of GPUs for tensor parallelism when launching vLLM "
+             "(only used with --provider vllm --launch-vllm). Default: 1.",
+    )
+    parser.add_argument(
+        "--launch-vllm", action="store_true",
+        help="Spawn a vLLM server subprocess before running inference. "
+             "The server is terminated automatically when the script exits.",
+    )
+    args = parser.parse_args()
 
-    test_file   = sys.argv[1]
-    output_file = sys.argv[2]
-    max_samples = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] else None
-    max_tries   = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else 1
+    if args.provider == "vllm":
+        if args.launch_vllm:
+            launch_vllm_server(args.model, args.base_url, args.tensor_parallel_size)
+        client = OpenAI(api_key="EMPTY", base_url=args.base_url)
+    else:
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-    data = json.load(open(test_file))
-    if max_samples is not None:
-        data = data[:max_samples]
+    model       = args.model
+    max_tries   = args.max_tries
 
-    print(f"Running with max_tries={max_tries} on {len(data)} samples.")
+    data = json.load(open(args.test_json))
+    if args.max_samples is not None:
+        data = data[:args.max_samples]
+
+    print(f"Running with provider={args.provider}, model={model}, "
+          f"max_tries={max_tries} on {len(data)} samples.")
 
     config = {
-        "_config": True,
-        "model":       "gpt-4",
-        "temperature": 0.0,
-        "argv":        sys.argv,
+        "_config":             True,
+        "provider":            args.provider,
+        "model":               model,
+        "tensor_parallel_size": args.tensor_parallel_size if args.provider == "vllm" else None,
+        "temperature":         0.0,
+        "argv":                vars(args),
     }
 
     results = []
@@ -140,7 +175,7 @@ def main():
             logged_prompt = messages[-1]["content"]
             print(f"  [Try {try_num}] Prompt:\n{logged_prompt}")
 
-            raw = call_api(messages)
+            raw = call_api(client, model, messages)
             print(f"  [Try {try_num}] Response:\n{raw}")
 
             # Parse inline so we can provide error feedback on the next turn.

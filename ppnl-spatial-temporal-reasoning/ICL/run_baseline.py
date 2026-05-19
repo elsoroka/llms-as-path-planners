@@ -24,14 +24,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from vllm_utils import launch_vllm_server
 
 load_dotenv()
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 PROMPT_FILE = Path(__file__).parent / 'prompts' / 'few-shot-prompts-single_goal_5.txt'
-MODEL       = 'gpt-4'
-TEMPERATURE = 0.0
-MAX_TOKENS  = 250
+DEFAULT_MODEL = 'gpt-4'
+TEMPERATURE   = 0.0
+MAX_TOKENS    = 250
 
 
 def load_prompt_template():
@@ -79,11 +79,11 @@ def check_path(world, response: str):
     return None
 
 
-def call_api(prompt: str) -> str:
+def call_api(client: OpenAI, model: str, prompt: str) -> str:
     for attempt in range(2):
         try:
             response = client.chat.completions.create(
-                model=MODEL,
+                model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=TEMPERATURE,
                 max_tokens=MAX_TOKENS,
@@ -97,6 +97,26 @@ def call_api(prompt: str) -> str:
                 raise
 
 
+def count_completed(output_jsonl: str) -> int:
+    """Return the number of sample records already written to output_jsonl."""
+    path = Path(output_jsonl)
+    if not path.exists():
+        return 0
+    count = 0
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not record.get("_config"):
+                count += 1
+    return count
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="5-shot ICL baseline inference on PPNL single-goal test sets."
@@ -107,37 +127,86 @@ def main():
         "--max-samples", type=int, default=None,
         help="Limit number of samples processed (default: all).",
     )
+    parser.add_argument(
+        "--provider", choices=["openai", "vllm"], default="openai",
+        help="Model provider (default: openai).",
+    )
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL,
+        help="Model name. For --provider vllm, use the HuggingFace model name "
+             "(e.g. deepseek-ai/deepseek-moe-16b-chat). Default: %(default)s.",
+    )
+    parser.add_argument(
+        "--base-url", default="http://localhost:8000/v1",
+        help="Base URL for the vLLM OpenAI-compatible endpoint (only used with "
+             "--provider vllm). Default: %(default)s.",
+    )
+    parser.add_argument(
+        "--tensor-parallel-size", type=int, default=1,
+        help="Number of GPUs for tensor parallelism when launching vLLM "
+             "(only used with --provider vllm --launch-vllm). Default: 1.",
+    )
+    parser.add_argument(
+        "--launch-vllm", action="store_true",
+        help="Spawn a vLLM server subprocess before running inference. "
+             "The server is terminated automatically when the script exits.",
+    )
     args = parser.parse_args()
+
+    if args.provider == "vllm":
+        if args.launch_vllm:
+            launch_vllm_server(args.model, args.base_url, args.tensor_parallel_size)
+        client = OpenAI(api_key="EMPTY", base_url=args.base_url)
+    else:
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    model = args.model
 
     template = load_prompt_template()
     data     = json.load(open(args.test_json))
     if args.max_samples is not None:
         data = data[:args.max_samples]
 
-    print(f"Running 5-shot baseline (model={MODEL}) on {len(data)} samples.")
+    already_done = count_completed(args.output_jsonl)
+    if already_done:
+        print(f"Resuming: skipping first {already_done} samples already in output file.")
+
+    print(f"Running 5-shot baseline (provider={args.provider}, model={model}) "
+          f"on {len(data)} samples.")
 
     config = {
-        "_config":     True,
-        "model":       MODEL,
+        "_config":             True,
+        "provider":            args.provider,
+        "model":               model,
+        "tensor_parallel_size": args.tensor_parallel_size if args.provider == "vllm" else None,
         "temperature": TEMPERATURE,
         "max_tokens":  MAX_TOKENS,
         "prompt_file": str(PROMPT_FILE),
         "argv":        vars(args),
     }
 
-    results = []
+    output_path = Path(args.output_jsonl)
+    # Write config line only if the file doesn't already exist.
+    if not output_path.exists():
+        with open(output_path, 'w') as f:
+            f.write(json.dumps(config) + '\n')
+
+    new_count = 0
     for i, sample in enumerate(data):
+        if i < already_done:
+            continue
+
         print(f"\n--- Sample {i} ---")
         prompt = build_prompt(template, sample['nl_description'])
         print(f"  Prompt:\n{prompt}")
 
-        raw = call_api(prompt)
+        raw = call_api(client, model, prompt)
         print(f"  Response: {raw!r}")
 
         error = check_path(sample['world'], raw)
         print(f"  {'Success' if error is None else 'Error: ' + error}")
 
-        results.append({
+        record = {
             "id":             i,
             "nl_description": sample['nl_description'],
             "ground_truth":   sample['agent_as_a_point'],
@@ -145,14 +214,15 @@ def main():
             "prompt":         prompt,
             "response":       raw,
             "error":          error,
-        })
+        }
 
-        with open(args.output_jsonl, 'w') as f:
-            f.write(json.dumps(config) + '\n')
-            for r in results:
-                f.write(json.dumps(r) + '\n')
+        with open(output_path, 'a') as f:
+            f.write(json.dumps(record) + '\n')
 
-    print(f"\nDone. Saved {len(results)} samples to {args.output_jsonl}")
+        new_count += 1
+
+    print(f"\nDone. Wrote {new_count} new samples to {args.output_jsonl} "
+          f"({already_done} already existed).")
 
 
 if __name__ == '__main__':

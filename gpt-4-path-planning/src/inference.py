@@ -1,36 +1,43 @@
 from helpers import fixed_length, single_environment, group_environments, decompose_sample
 from prompting import n_shot_prompt, next_example, VALS_OOD, VALS_IID
 from openai import OpenAI
+import argparse
 import json
 import time
 import os
 from evaluate import success_sg
 import sys
 from dotenv import load_dotenv
+from vllm_utils import launch_vllm_server
 
 load_dotenv()
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-def inference(prompt, model='gpt-4-turbo', message_texts = None):
+# client and model are set in main() based on --provider / --model args.
+client = None
+_model = 'gpt-4-turbo'
+
+def inference(prompt, model=None, message_texts=None):
     print(prompt)
-    if(message_texts == None):
+    if model is None:
+        model = _model
+    if message_texts is None:
         message_text = [
             {
-                "role":"system",
-                "content":prompt
+                "role": "system",
+                "content": prompt
             }
         ]
     else:
         message_text = message_texts
-    
+
     completion = client.chat.completions.create(
-        model=model,  
-        messages = message_text,  
-        temperature=0.0,  
-        max_tokens=200,  
-        top_p=0.95,  
-        frequency_penalty=0.25,  
-        presence_penalty=0,  
+        model=model,
+        messages=message_text,
+        temperature=0.0,
+        max_tokens=200,
+        top_p=0.95,
+        frequency_penalty=0.25,
+        presence_penalty=0,
         stop=None
     )
 
@@ -79,7 +86,7 @@ def few_shot_inference(train, test_set, n_exemplars, representation):
 
 def main():
     '''
-    CLA: 
+    CLA:
     type of test
         - length: few-shot examples are of the same length as test samples
         - env: few-shot examples and test set are drawn from the same environment
@@ -94,6 +101,41 @@ def main():
         - AE
         - Grid2Grid
     '''
+    global client, _model
+
+    # Parse provider/model args from the tail of argv, leaving positional
+    # sys.argv indices intact for the existing logic below.
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--provider", choices=["openai", "vllm"], default="openai")
+    parser.add_argument("--model", default=None,
+                        help="Model name. For --provider vllm, use the HuggingFace "
+                             "model name (e.g. deepseek-ai/deepseek-moe-16b-chat).")
+    parser.add_argument("--base-url", default="http://localhost:8000/v1",
+                        help="vLLM OpenAI-compatible endpoint (only used with "
+                             "--provider vllm).")
+    parser.add_argument("--tensor-parallel-size", type=int, default=1,
+                        help="Number of GPUs for tensor parallelism when launching "
+                             "vLLM (only used with --provider vllm --launch-vllm). "
+                             "Default: 1.")
+    parser.add_argument("--launch-vllm", action="store_true",
+                        help="Spawn a vLLM server subprocess before running inference. "
+                             "The server is terminated automatically when the script exits.")
+    known, remaining = parser.parse_known_args()
+
+    if known.provider == "vllm":
+        _model = known.model or "deepseek-ai/deepseek-moe-16b-chat"
+        if known.launch_vllm:
+            launch_vllm_server(_model, known.base_url, known.tensor_parallel_size)
+        client = OpenAI(api_key="EMPTY", base_url=known.base_url)
+    else:
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        _model = known.model or "gpt-4-turbo"
+
+    print(f"Provider: {known.provider}, model: {_model}")
+
+    # Rebuild sys.argv from the non-option tokens so the positional
+    # indices below continue to work.
+    sys.argv = [sys.argv[0]] + remaining
 
     choice = sys.argv[1]
 
