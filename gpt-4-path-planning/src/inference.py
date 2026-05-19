@@ -8,7 +8,7 @@ import os
 from evaluate import success_sg
 import sys
 from dotenv import load_dotenv
-from vllm_utils import launch_vllm_server
+from vllm_utils import launch_vllm_server, strip_thinking, vllm_extra_body
 
 load_dotenv()
 
@@ -38,9 +38,14 @@ def inference(prompt, model=None, message_texts=None):
         top_p=0.95,
         frequency_penalty=0.25,
         presence_penalty=0,
-        stop=None
+        stop=None,
+        extra_body=vllm_extra_body(model),
     )
 
+    # Strip any <think>...</think> blocks before returning.
+    completion.choices[0].message.content = strip_thinking(
+        completion.choices[0].message.content
+    )
     return completion
 
 

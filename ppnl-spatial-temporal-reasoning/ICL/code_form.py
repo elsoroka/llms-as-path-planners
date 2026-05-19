@@ -5,7 +5,7 @@ import time
 from openai import OpenAI
 from dotenv import load_dotenv
 from parse_code_form import parse_response, check_path
-from vllm_utils import launch_vllm_server
+from vllm_utils import launch_vllm_server, strip_thinking, vllm_extra_body
 
 load_dotenv()
 
@@ -69,6 +69,7 @@ def build_feedback_message(error: str) -> str:
 
 def call_api(client: OpenAI, model: str, messages: list) -> str:
     """Call the API with one retry on failure."""
+    extra_body = vllm_extra_body(model)
     for attempt in range(2):
         try:
             response = client.chat.completions.create(
@@ -76,8 +77,9 @@ def call_api(client: OpenAI, model: str, messages: list) -> str:
                 messages=messages,
                 temperature=0.0,
                 max_tokens=300,
+                extra_body=extra_body,
             )
-            return response.choices[0].message.content
+            return strip_thinking(response.choices[0].message.content)
         except Exception as e:
             if attempt == 0:
                 print(f"API error: {e}. Retrying in 25s...")

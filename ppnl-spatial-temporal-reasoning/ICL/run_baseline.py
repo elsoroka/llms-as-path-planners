@@ -24,7 +24,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
-from vllm_utils import launch_vllm_server
+from vllm_utils import launch_vllm_server, strip_thinking, vllm_extra_body
 
 load_dotenv()
 
@@ -80,6 +80,7 @@ def check_path(world, response: str):
 
 
 def call_api(client: OpenAI, model: str, prompt: str) -> str:
+    extra_body = vllm_extra_body(model)
     for attempt in range(2):
         try:
             response = client.chat.completions.create(
@@ -87,8 +88,9 @@ def call_api(client: OpenAI, model: str, prompt: str) -> str:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=TEMPERATURE,
                 max_tokens=MAX_TOKENS,
+                extra_body=extra_body,
             )
-            return response.choices[0].message.content
+            return strip_thinking(response.choices[0].message.content)
         except Exception as e:
             if attempt == 0:
                 print(f"API error: {e}. Retrying in 25s...")

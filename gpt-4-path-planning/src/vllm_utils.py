@@ -1,20 +1,45 @@
 """
 Utilities for optionally launching a vLLM OpenAI-compatible server as a
-subprocess from within an inference script.
+subprocess from within an inference script, and for post-processing model
+responses.
 
 Typical usage in an inference script::
 
-    from vllm_utils import launch_vllm_server
+    from vllm_utils import launch_vllm_server, strip_thinking, vllm_extra_body
 
     if args.launch_vllm:
         launch_vllm_server(args.model, args.base_url, args.tensor_parallel_size)
+
+    # In call_api():
+    extra_body = vllm_extra_body(model)   # disables thinking for Qwen models
+    response = client.chat.completions.create(..., extra_body=extra_body)
+    text = strip_thinking(response.choices[0].message.content)
 """
 
 import atexit
+import re
 import subprocess
 import time
 import urllib.request
 from urllib.parse import urlparse
+
+
+def strip_thinking(text: str) -> str:
+    """Remove <think>...</think> blocks from a model response."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
+def vllm_extra_body(model: str) -> dict | None:
+    """
+    Return an extra_body dict to pass to the vLLM API for the given model,
+    or None if no extra configuration is needed.
+
+    Currently disables the built-in chain-of-thought for Qwen3 models, which
+    otherwise consume most of the token budget on reasoning before answering.
+    """
+    if "qwen" in model.lower():
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+    return None
 
 
 def _parse_base_url(base_url: str):
