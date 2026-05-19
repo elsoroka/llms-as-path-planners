@@ -4,9 +4,7 @@
 # Requires STANFORD_API_KEY in .env at the repo root.
 #
 # Outputs saved to src/outputs_fullSet/ following inference.py conventions:
-#   env_from_file_out_5_shot_{geometry}_Code_{iid|ood}_fewShot_25x25.json
-# Note: files for different models will overwrite each other — rename or move
-# outputs_fullSet/ between model runs if you need to keep all results.
+#   env_from_file_out_5_shot_{geometry}_Code_{model}_{iid|ood}_fewShot_25x25.json
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

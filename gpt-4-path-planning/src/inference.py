@@ -143,6 +143,8 @@ def main():
         _model = known.model or "gpt-4-turbo"
 
     print(f"Provider: {known.provider}, model: {_model}")
+    # Sanitize model name for use in filenames (e.g. HuggingFace "org/model" -> "org_model").
+    _model_slug = _model.replace("/", "_")
 
     # Rebuild sys.argv from the non-option tokens so the positional
     # indices below continue to work.
@@ -174,8 +176,8 @@ def main():
 
         # Determine output paths before the loop so we can resume.
         grid_size = len(iid_data[0]['world']) if iid_data else 25
-        iid_out_path = f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_iid_fewShot_{grid_size}x{grid_size}.json'
-        ood_out_path = f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_ood_fewShot_{grid_size}x{grid_size}.json'
+        iid_out_path = f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_{_model_slug}_iid_fewShot_{grid_size}x{grid_size}.json'
+        ood_out_path = f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_{_model_slug}_ood_fewShot_{grid_size}x{grid_size}.json'
 
         # Load existing results to enable resuming interrupted runs.
         res_iid = []
@@ -259,8 +261,8 @@ def main():
 
             # Determine output paths before the loop so we can resume.
             grid_size = len(iid_data[0]['world']) if iid_data else 25
-            iid_out_path = f'../outputs/{choice}_out_5_shot_{geometry}_{representation}_iid_fewShot_{grid_size}x{grid_size}.json'
-            ood_out_path = f'../outputs/{choice}_out_5_shot_{geometry}_{representation}_ood_fewShot_{grid_size}x{grid_size}.json'
+            iid_out_path = f'../outputs/{choice}_out_5_shot_{geometry}_{representation}_{_model_slug}_iid_fewShot_{grid_size}x{grid_size}.json'
+            ood_out_path = f'../outputs/{choice}_out_5_shot_{geometry}_{representation}_{_model_slug}_ood_fewShot_{grid_size}x{grid_size}.json'
 
             # Load existing results to enable resuming interrupted runs.
             res_iid = []
