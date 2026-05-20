@@ -58,8 +58,9 @@ def _resolve(record):
     """
     Return (action_str, error, successful_try) for one raw jsonl record.
 
-    Handles three formats:
-      - multi-try code_form  (has 'attempts' list with move_x/move_y responses)
+    Handles four formats:
+      - multi-try code_form      (has 'attempts' list with move_x/move_y responses)
+      - multi-try text_feedback  (has 'attempts' list with direction-token responses)
       - single-response code_form  (has 'response' with move_x/move_y calls)
       - baseline  (has 'response' with plain direction tokens)
     """
@@ -68,9 +69,13 @@ def _resolve(record):
         for a in attempts:
             if a['error'] is None:
                 actions, _ = _parse_response(a['response'])
+                if not actions:
+                    actions = _extract_direction_tokens(a['response'])
                 return actions, None, a['try']
         last = attempts[-1]
         actions, _ = _parse_response(last['response'])
+        if not actions:
+            actions = _extract_direction_tokens(last['response'])
         return actions, last['error'], None
 
     response = record['response']
@@ -108,7 +113,43 @@ def _parse_filename(stem):
     PPNL code pattern: code_form_k{K}_{testset_name}
     PPNL baseline:     baseline_5shot_{testset_name}
     """
-    # gpt-4-path-planning
+    # gpt-4-path-planning with Stanford/vLLM model prefix
+    # code_form_stanford_{model}_{geometry}_{split}_k{K}_{repr}
+    m = re.match(
+        r'code_form_stanford_(?P<model>.+?)_(?P<geometry>rectangle|maze|zig_zag)'
+        r'_(?P<split>iid|ood)_k(?P<max_tries>\d+)_(?P<repr>text|code|grid)$',
+        stem,
+    )
+    if m:
+        d = m.groupdict()
+        return {
+            'geometry':   d['geometry'],
+            'split':      d['split'],
+            'grid_size':  '',
+            'visibility': '',
+            'repr':       d['repr'],
+            'max_tries':  int(d['max_tries']),
+        }
+
+    # text_feedback: text_feedback_{geometry}_{split}_k{K}_{repr}_{model}
+    m = re.match(
+        r'text_feedback_(?P<geometry>rectangle|maze|zig_zag)'
+        r'_(?P<split>iid|ood)_k(?P<max_tries>\d+)_(?P<repr>text|code|grid)'
+        r'_(?P<model>.+)$',
+        stem,
+    )
+    if m:
+        d = m.groupdict()
+        return {
+            'geometry':   d['geometry'],
+            'split':      d['split'],
+            'grid_size':  '',
+            'visibility': '',
+            'repr':       d['repr'],
+            'max_tries':  int(d['max_tries']),
+        }
+
+    # gpt-4-path-planning (original pattern, no model prefix)
     m = re.match(
         r'code_form_(?P<geometry>.+)_(?P<split>iid|ood)_k(?P<max_tries>\d+)'
         r'_(?P<repr>text|code|grid)$',
@@ -255,7 +296,7 @@ def main():
     # Find raw inference files; skip test/smoke files without a known pattern
     jsonl_files = sorted(
         p for p in out_dir.glob('*.jsonl')
-        if re.match(r'(code_form|baseline)_', p.stem)
+        if re.match(r'(code_form|text_feedback|baseline)_', p.stem)
     )
     if not jsonl_files:
         print(f"No code_form_*.jsonl files found in {out_dir}", file=sys.stderr)
