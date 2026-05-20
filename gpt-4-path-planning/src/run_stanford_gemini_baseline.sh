@@ -3,7 +3,7 @@
 # test sets via the Stanford AI Playground API using Gemini models.
 # Requires STANFORD_API_KEY in .env at the repo root.
 #
-# Outputs saved to src/outputs_fullSet/ following inference.py conventions:
+# Outputs saved to src/outputs_baseline/ following inference.py conventions:
 #   env_from_file_out_5_shot_{geometry}_Code_{model}_{iid|ood}_fewShot_25x25.json
 set -euo pipefail
 
@@ -31,9 +31,9 @@ OOD_FILE["maze"]="maze_data_sg_ood.json"
 IID_FILE["zig_zag"]="zig_zag_data_sg_indist.json"
 OOD_FILE["zig_zag"]="zig_zag_data_sg_ood.json"
 
-mkdir -p "$SCRIPT_DIR/outputs_fullSet"
+mkdir -p "$SCRIPT_DIR/outputs_baseline"
 
-# inference.py writes to outputs_fullSet/ relative to cwd, so run from SCRIPT_DIR.
+# inference.py writes to outputs_baseline/ relative to cwd, so run from SCRIPT_DIR.
 cd "$SCRIPT_DIR"
 
 for model in "${MODELS[@]}"; do
@@ -55,4 +55,4 @@ for model in "${MODELS[@]}"; do
 done
 
 echo ""
-echo "All done. Results in $SCRIPT_DIR/outputs_fullSet/"
+echo "All done. Results in $SCRIPT_DIR/outputs_baseline/"

@@ -176,8 +176,8 @@ def main():
 
         # Determine output paths before the loop so we can resume.
         grid_size = len(iid_data[0]['world']) if iid_data else 25
-        iid_out_path = f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_{_model_slug}_iid_fewShot_{grid_size}x{grid_size}.json'
-        ood_out_path = f'outputs_fullSet/{choice}_out_5_shot_{geometry}_{representation}_{_model_slug}_ood_fewShot_{grid_size}x{grid_size}.json'
+        iid_out_path = f'outputs_baseline/{choice}_out_5_shot_{geometry}_{representation}_{_model_slug}_iid_fewShot_{grid_size}x{grid_size}.json'
+        ood_out_path = f'outputs_baseline/{choice}_out_5_shot_{geometry}_{representation}_{_model_slug}_ood_fewShot_{grid_size}x{grid_size}.json'
 
         # Load existing results to enable resuming interrupted runs.
         res_iid = []
