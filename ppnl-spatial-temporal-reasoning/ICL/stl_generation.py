@@ -71,7 +71,7 @@ def build_feedback_message(error: str) -> str:
     return (
         f"That solution is incorrect.\n"
         f"Error: {error}\n"
-        "Please write a corrected solve() function.\n"
+        "Please write a corrected safe_paths() function.\n"
         "```python\n"
     )
 
@@ -198,6 +198,10 @@ def main():
             print(f"\n--- Sample {i} (skipped, already done) ---")
             continue
         print(f"\n--- Sample {i} ---")
+        sc = sample.get('solution_coordinates')
+        if not isinstance(sc, list) or not sc or not isinstance(sc[-1], (list, tuple)) or len(sc[-1]) < 2:
+            print("  Skipping: no valid solution_coordinates")
+            continue
         initial_prompt = build_prompt(sample)
 
         # Build the message history for this sample; grows on retries.
