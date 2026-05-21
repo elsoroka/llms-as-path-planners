@@ -195,7 +195,7 @@ def main():
         n, n_succ      = success_rate(records)
         rate           = n_succ / n if n > 0 else float("nan")
         n_opt, n_succ2 = optimality_stats(records)
-        opt_rate       = (n_opt / n_succ2) if n_succ2 else float("nan")
+        opt_rate       = (n_opt / n) if n > 0 else float("nan")
 
         rows.append({
             "method":           method,
