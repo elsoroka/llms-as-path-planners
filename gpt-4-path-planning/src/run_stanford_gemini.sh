@@ -24,8 +24,8 @@ declare -a TEST_SETS=(
     "zig_zag   ood zig_zag_data_sg_ood.json"
 )
 
-REPR="text"
-MAX_TRIES=3
+REPR="code"
+MAX_TRIES=7
 MAX_SAMPLES=100
 
 for model in "${MODELS[@]}"; do

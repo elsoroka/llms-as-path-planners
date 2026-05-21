@@ -1,0 +1,8 @@
+*.jsonl
+*.csv
+*.pdf
+*.png
+*.out
+*.txt
+*.json
+__pycache__/

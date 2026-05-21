@@ -36,6 +36,13 @@ llms-as-path-planners/
     │   ├── gpt4.py               # GPT-4 integration
     │   ├── hierarchical.py       # Hierarchical planning strategy
     │   ├── react.py              # ReAct prompting strategy
+    │   ├── code_form.py          # Code-form strategy (move_x/move_y)
+    │   ├── text_feedback.py      # Text baseline with feedback loop
+    │   ├── stl_generation.py     # STL code-form strategy (safe_paths DSL)
+    │   ├── stl_math_generation.py # STL math-form strategy (plain text formulas)
+    │   ├── stl_def.py            # Trajectory/Predicate DSL classes
+    │   ├── parse_stl.py          # STL code-form validator
+    │   ├── parse_stl_math.py     # STL math-form validator (rtamt + bool eval)
     │   └── prompts/              # Prompt templates
     ├── evaluate/                 # Evaluation scripts
     └── train/                    # T5/BART fine-tuning (SLURM)
@@ -133,6 +140,60 @@ Both subprojects have a fully-implemented code-form strategy that asks the LLM t
 - `"Out of bounds at step N: tried to move to (r, c)"`
 - `"Hit obstacle at step N: (r, c)"`
 - `"Path ended at (r, c) but goal is at (gr, gc)"`
+
+### STL Generation — Code Form (DONE)
+
+Ask the LLM to write a Python `safe_paths(x, y)` function that returns a `Predicate` describing safe paths to the goal. `x` and `y` are `Trajectory` objects (sequences of row/col values along the path).
+
+**DSL (defined in `stl_def.py`):** `Trajectory`, `And`, `Or`, `Not`, `Implies`, `Always`, `Eventually`, `Until`. Comparison operators (`==`, `<`, `>`, `<=`, `>=`) on `Trajectory` return `Predicate` objects directly.
+
+**Files:**
+- `ppnl-spatial-temporal-reasoning/ICL/stl_generation.py` — inference; `--provider {openai,vllm,stanford}`, `--model`, `--max-tries` (default 1)
+- `ppnl-spatial-temporal-reasoning/ICL/parse_stl.py` — `check_stl()` validator; executes the generated function and checks it against the ground-truth path (must pass) and adversarial paths (must fail: wrong endpoint, each obstacle cell)
+- `ppnl-spatial-temporal-reasoning/ICL/stl_def.py` — `Trajectory`/`Predicate` class definitions
+- `ppnl-spatial-temporal-reasoning/ICL/run_stl_gpt4.sh` — loops over 4 PPNL test sets with GPT-4.1, `--max-tries 3`
+- `ppnl-spatial-temporal-reasoning/ICL/run_stl_stanford_gemini.sh` — same loop for Stanford Gemini models
+
+**Prompt structure (one-shot):** Fixed 6×6 example (obstacle at (2,1), goal (0,1)) demonstrating `safe_paths(x, y)` using `And`, `Always`, `Not`, `Eventually`.
+
+**Validation logic (`check_stl`):**
+- Evaluates the formula on the ground-truth trajectory — must hold.
+- Evaluates on a path that ends at the start instead of the goal — must fail.
+- Evaluates on a path extended by each obstacle cell — must fail.
+
+**Feedback message** (on retry):
+```
+That solution is incorrect.
+Error: <error>
+Please write a corrected safe_paths() function.
+```python
+```
+
+### STL Generation — Math Form (DONE)
+
+Ask the LLM to write a plain-text STL formula using standard notation (rtamt syntax), rather than Python code.
+
+**Formula syntax:** `G(phi)` (always), `F(phi)` (eventually), `phi U psi` (until), `not(phi)`, `phi and psi`, `phi or psi`. Atomic predicates: `x == 3`, `y < 2`, etc.
+
+**Files:**
+- `ppnl-spatial-temporal-reasoning/ICL/stl_math_generation.py` — inference; same CLI as `stl_generation.py`
+- `ppnl-spatial-temporal-reasoning/ICL/parse_stl_math.py` — `check_stl_math()` validator; uses rtamt for syntax checking and a custom recursive-descent boolean evaluator for correctness (avoids rtamt robustness-semantics issues with integer equality)
+- `ppnl-spatial-temporal-reasoning/ICL/run_stl_math_gpt4.sh` — loops over 4 PPNL test sets with GPT-4.1, `--max-tries 3`
+- `ppnl-spatial-temporal-reasoning/ICL/run_stl_math_stanford_gemini.sh` — same loop for Stanford Gemini models
+
+**Prompt structure (one-shot):** Same 6×6 example as STL code form; solution is `G(not(x == 2 and y == 1)) and F(x == 0 and y == 1)`.
+
+**Validation logic (`check_stl_math`):** Same adversarial-path approach as `check_stl` above; rtamt parses syntax, custom `_BoolEval` evaluates truth.
+
+**Feedback message** (on retry):
+```
+That formula is incorrect.
+Error: <error>
+Please write a corrected STL formula.
+```
+```
+
+Both STL strategies share the same output JSONL format (with `attempts` list) and resume support as the other strategies.
 
 ### Text-Output Baseline (DONE)
 
