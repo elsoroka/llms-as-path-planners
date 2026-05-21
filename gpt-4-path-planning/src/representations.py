@@ -9,8 +9,8 @@ initial_location = {(initial_loc[0], initial_loc[1])}
 """
     for pts in points:
         output += f"""
-for i in range({pts[0][0]}, {pts[3][0]}):
-    for j in range({pts[0][1]}, {pts[3][1]}):
+for i in range({pts[0][0]}, {pts[3][0] + 1}):
+    for j in range({pts[0][1]}, {pts[3][1] + 1}):
         obstacles.append((i, j))
         """
     return output

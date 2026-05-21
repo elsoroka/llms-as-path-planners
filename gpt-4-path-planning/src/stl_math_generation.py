@@ -172,10 +172,12 @@ def main():
                 rec = json.loads(line)
                 if rec.get("_config"):
                     continue
-                results.append(rec)
-                done_ids.add(rec["id"])
+                # Only keep/skip samples that already succeeded; re-run failures.
+                if rec.get("attempts") and rec["attempts"][-1]["error"] is None:
+                    results.append(rec)
+                    done_ids.add(rec["id"])
         if done_ids:
-            print(f"Resuming: {len(done_ids)} samples already done, skipping them.")
+            print(f"Resuming: {len(done_ids)} succeeded samples skipped, re-running failures.")
 
     for i, sample in enumerate(data):
         if i in done_ids:
