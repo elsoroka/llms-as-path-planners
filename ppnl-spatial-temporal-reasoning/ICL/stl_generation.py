@@ -15,26 +15,27 @@ ONE_SHOT_TASK = (
     "There are obstacles that you have to avoid at: (2,1). "
     "You have to reach the goal (0,1). "
 )
-STL_PROMPT = """Your task is to write a Python function describing atemporal logic predicate that defines safe paths to the goal.
-A Trajectory is a wrapped sequence of floating-point numbers.
-You may construct a Predicate from a Trajectory using mathematical operators +, -, <, >, <=, >=, ==
+STL_PROMPT = """Your task is to write a Python function safe_paths(x, y) that returns a temporal logic Predicate defining safe paths to the goal.
 
-For example,
-Trajectory: [(0,0), (0,1), (0,2), (0,3)]
-Predicates: x + y == 3, x < 3, y > x
+x and y are Trajectory objects — sequences of coordinate values along a path. They are already provided; do not redefine them and do not redefine Any of the operators below.
 
-You do not need to think about the numerical values of x and y.
+You may build Predicates directly from Trajectories using: ==, <, >, <=, >=
+  e.g.  x == 3      (True at every step where the x-coordinate is 3)
+        y < 2       (True at every step where the y-coordinate is less than 2)
 
-You may use the temporal logic functions
-* Always(p:Predicate)->Predicate
-* Eventually(p:Predicate)->Predicate
-* Until(p:Predicate, q:Predicate)->Predicate
+Combine Predicates with the Boolean operators:
+* And(p, q, ...) -> Predicate   (all must hold at each step)
+* Or(p, q, ...)  -> Predicate   (at least one holds at each step)
+* Not(p)         -> Predicate   (negation at each step)
+* Implies(p, q)  -> Predicate
 
-and the Boolean functions
-* And(ps:[Predicate])->Predicate
-* Or(ps:[Predicate])->Predicate
-* Not(p:Predicate)->Predicate
-* Implies(p:Predicate, q:Predicate)->Predicate
+Wrap Predicates in temporal operators:
+* Always(p)      -> Predicate   (p holds at every step)
+* Eventually(p)  -> Predicate   (p holds at some step)
+* Until(p, q)    -> Predicate   (p holds until q becomes true)
+
+Do NOT import any modules, redefine any of these operators, or use lambda functions.
+Your function must return a single Predicate built from the operators above.
 """
 
 ONE_SHOT_CODE = """\
@@ -178,8 +179,24 @@ def main():
         "argv":                vars(args),
     }
 
+    # Resume: load any results already written to the output file.
     results = []
+    done_ids = set()
+    if os.path.exists(output_file):
+        with open(output_file) as f:
+            for line in f:
+                rec = json.loads(line)
+                if rec.get("_config"):
+                    continue
+                results.append(rec)
+                done_ids.add(rec["id"])
+        if done_ids:
+            print(f"Resuming: {len(done_ids)} samples already done, skipping them.")
+
     for i, sample in enumerate(data):
+        if i in done_ids:
+            print(f"\n--- Sample {i} (skipped, already done) ---")
+            continue
         print(f"\n--- Sample {i} ---")
         initial_prompt = build_prompt(sample)
 
