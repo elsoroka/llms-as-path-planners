@@ -23,6 +23,7 @@ import json
 import os
 import re
 import csv
+from parse_code_form import parse_response
 
 OUTPUTS_DIR = os.path.join(os.path.dirname(__file__), "outputs")
 OUT_CSV     = os.path.join(OUTPUTS_DIR, "results_summary.csv")
@@ -128,6 +129,47 @@ def success_rate(records):
     return n_total, n_success
 
 
+def optimality_stats(records):
+    """
+    Compute optimality rate for a list of sample records.
+
+    Baseline format: record has top-level 'response' (direction tokens).
+    Code-form format: record has 'attempts' list; parse move_x/move_y calls
+      from the first successful attempt's response.
+
+    A successful record is optimal when its path length equals the number of
+    tokens in 'ground_truth' (the A*-optimal path).
+
+    Returns (n_optimal, n_success).
+    """
+    n_optimal = 0
+    n_success = 0
+    for r in records:
+        if "_config" in r:
+            continue
+
+        gt_len = len(r.get("ground_truth", "").split())
+
+        if "attempts" in r:
+            # Code-form: find first successful attempt and parse its moves.
+            successful = next((a for a in r["attempts"] if a["error"] is None), None)
+            if successful is None:
+                continue
+            n_success += 1
+            actions, _ = parse_response(successful["response"])
+            if len(actions.split()) == gt_len:
+                n_optimal += 1
+        else:
+            # Baseline: top-level error + response are direction tokens.
+            if r.get("error") is not None:
+                continue
+            n_success += 1
+            if len(r.get("response", "").split()) == gt_len:
+                n_optimal += 1
+
+    return n_optimal, n_success
+
+
 def load_jsonl(path):
     records = []
     with open(path) as f:
@@ -149,28 +191,34 @@ def main():
             continue
         method, provider, model, test_set = parsed
 
-        records   = load_jsonl(os.path.join(OUTPUTS_DIR, fname))
-        n, n_succ = success_rate(records)
-        rate      = n_succ / n if n > 0 else float("nan")
+        records        = load_jsonl(os.path.join(OUTPUTS_DIR, fname))
+        n, n_succ      = success_rate(records)
+        rate           = n_succ / n if n > 0 else float("nan")
+        n_opt, n_succ2 = optimality_stats(records)
+        opt_rate       = (n_opt / n_succ2) if n_succ2 else float("nan")
 
         rows.append({
-            "method":       method,
-            "provider":     provider,
-            "model":        model,
-            "test_set":     test_set,
-            "n_samples":    n,
-            "n_success":    n_succ,
-            "success_rate": f"{rate:.4f}",
+            "method":           method,
+            "provider":         provider,
+            "model":            model,
+            "test_set":         test_set,
+            "n_samples":        n,
+            "n_success":        n_succ,
+            "success_rate":     f"{rate:.4f}",
+            "n_optimal":        n_opt,
+            "optimality_rate":  f"{opt_rate:.4f}",
         })
+        opt_str = f"{n_opt}/{n_succ2} = {opt_rate:.1%}"
         print(f"  {method:20s} | {model:30s} | {test_set:30s} | "
-              f"{n_succ}/{n} = {rate:.1%}")
+              f"success {n_succ}/{n} = {rate:.1%} | optimal {opt_str}")
 
     if not rows:
         print("No results found.")
         return
 
     fieldnames = ["method", "provider", "model", "test_set",
-                  "n_samples", "n_success", "success_rate"]
+                  "n_samples", "n_success", "success_rate",
+                  "n_optimal", "optimality_rate"]
     with open(OUT_CSV, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
