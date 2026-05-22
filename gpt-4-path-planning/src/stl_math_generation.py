@@ -172,8 +172,7 @@ def main():
                 rec = json.loads(line)
                 if rec.get("_config"):
                     continue
-                # Only keep/skip samples that already succeeded; re-run failures.
-                if rec.get("attempts") and rec["attempts"][-1]["error"] is None:
+                if rec.get("attempts") and rec["attempts"][-1]["error"] is None or '```' not in rec["attempts"][-1]["error"]:
                     results.append(rec)
                     done_ids.add(rec["id"])
         if done_ids:
@@ -203,13 +202,11 @@ def main():
 
             start = raw.find("```")
             if start == -1:
-                error = "No ``` block found in response"
-                attempts.append({"try": try_num, "prompt": logged_prompt,
-                                  "response": raw, "error": error})
-                break
-            start = raw.find("\n", start) + 1
-            end = raw.find("```", start)
-            formula = raw[start:end].strip() if end != -1 else raw[start:].strip()
+                formula = raw.strip()
+            else:
+                start = raw.find("\n", start) + 1
+                end = raw.find("```", start)
+                formula = raw[start:end].strip() if end != -1 else raw[start:].strip()
             error = check_stl_math(stl_sample, formula)
 
             attempts.append({"try": try_num, "prompt": logged_prompt,

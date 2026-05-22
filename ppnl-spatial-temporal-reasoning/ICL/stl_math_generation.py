@@ -20,8 +20,8 @@ STL_PROMPT = """Your task is to write a Signal Temporal Logic (STL) formula that
 x and y are signals representing the row and column coordinates along a path at each time step.
 
 Write the formula using the following operators:
-  G(phi)        — phi holds at every step (globally/always)
-  F(phi)        — phi holds at some step (eventually)
+  G(phi)        — phi holds at every step (globally/always).
+  F(phi)        — phi holds at some step (eventually).
   phi U psi     — phi holds until psi becomes true
   not(phi)      — negation
   phi and psi   — conjunction
@@ -44,12 +44,12 @@ def build_prompt(sample: dict) -> str:
 
     return (
         STL_PROMPT + "\n"
-        "For example:\n"
-        f"Task: {ONE_SHOT_TASK}\n"
-        "```\n"
-        f"{ONE_SHOT_FORMULA}\n"
-        "```\n"
-        "\n"
+        #"For example:\n"
+       # f"Task: {ONE_SHOT_TASK}\n"
+#        "```\n"
+        #f"{ONE_SHOT_FORMULA}\n"
+        #"```\n"
+        #"\n"
         "Now write an STL formula for this task:\n"
         f"Task: {stem}\n{goal}\n"
         "```\n"
@@ -178,16 +178,21 @@ def main():
                 rec = json.loads(line)
                 if rec.get("_config"):
                     continue
-                results.append(rec)
-                done_ids.add(rec["id"])
+                if rec.get("attempts") and rec["attempts"][-1]["error"] is None or '```' not in rec["attempts"][-1]["error"]:
+                    results.append(rec)
+                    done_ids.add(rec["id"])
         if done_ids:
-            print(f"Resuming: {len(done_ids)} samples already done, skipping them.")
+            print(f"Resuming: {len(done_ids)} succeeded samples skipped, re-running failures.")
 
     for i, sample in enumerate(data):
         if i in done_ids:
             print(f"\n--- Sample {i} (skipped, already done) ---")
             continue
         print(f"\n--- Sample {i} ---")
+        sc = sample.get('solution_coordinates')
+        if not isinstance(sc, list) or not sc or not isinstance(sc[-1], (list, tuple)) or len(sc[-1]) < 2:
+            print("  Skipping: no valid solution_coordinates")
+            continue
         initial_prompt = build_prompt(sample)
 
         # Build the message history for this sample; grows on retries.
@@ -204,11 +209,11 @@ def main():
             # Parse inline so we can provide error feedback on the next turn.
             start = raw.find("```")
             if start == -1:
-                error = "No ``` block found in response"
-                break
-            start = raw.find("\n", start) + 1  # skip past the opening fence line
-            end = raw.find("```", start)
-            formula = raw[start:end].strip() if end != -1 else raw[start:].strip()
+                formula = raw.strip()
+            else:
+                start = raw.find("\n", start) + 1  # skip past the opening fence line
+                end = raw.find("```", start)
+                formula = raw[start:end].strip() if end != -1 else raw[start:].strip()
             error = check_stl_math(sample, formula)
 
             attempts.append({

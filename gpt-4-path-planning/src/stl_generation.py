@@ -182,8 +182,7 @@ def main():
                 rec = json.loads(line)
                 if rec.get("_config"):
                     continue
-                # Only keep/skip samples that already succeeded; re-run failures.
-                if rec.get("attempts") and rec["attempts"][-1]["error"] is None:
+                if rec.get("attempts") and rec["attempts"][-1]["error"] is None or '```' not in rec["attempts"][-1]["error"]:
                     results.append(rec)
                     done_ids.add(rec["id"])
         if done_ids:
@@ -215,35 +214,36 @@ def main():
             if start == -1:
                 start = raw.find("```")
             if start == -1:
-                error = "No ```python block found in response"
+                stl = raw.strip()
+            else:
+                start = raw.find("\n", start) + 1
+                end = raw.find("```", start)
+                stl = raw[start:end].strip() if end != -1 else raw[start:].strip()
+            try:
+                error = check_stl(stl_sample, stl)
+
                 attempts.append({"try": try_num, "prompt": logged_prompt,
-                                  "response": raw, "error": error})
-                break
-            start = raw.find("\n", start) + 1
-            end = raw.find("```", start)
-            stl = raw[start:end].strip() if end != -1 else raw[start:].strip()
-            error = check_stl(stl_sample, stl)
+                                "response": raw, "error": error})
 
-            attempts.append({"try": try_num, "prompt": logged_prompt,
-                              "response": raw, "error": error})
+                if error is None:
+                    print(f"  [Try {try_num}] Success!")
+                    break
 
-            if error is None:
-                print(f"  [Try {try_num}] Success!")
-                break
+                print(f"  [Try {try_num}] Error: {error}")
+                if try_num < max_tries:
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({"role": "user", "content": build_feedback_message(error)})
 
-            print(f"  [Try {try_num}] Error: {error}")
-            if try_num < max_tries:
-                messages.append({"role": "assistant", "content": raw})
-                messages.append({"role": "user", "content": build_feedback_message(error)})
-
-        result = {
-            "id":                  i,
-            "code_representation": sample["code_representation"],
-            "ground_truth":        sample["path"],
-            "world":               sample["world"],
-            "attempts":            attempts,
-        }
-        results.append(result)
+                result = {
+                    "id":                  i,
+                    "code_representation": sample["code_representation"],
+                    "ground_truth":        sample["path"],
+                    "world":               sample["world"],
+                    "attempts":            attempts,
+                }
+                results.append(result)
+            except Exception as e:
+                print("Sample skipped due to error: ", e)
 
         with open(output_file, 'w') as f:
             f.write(json.dumps(config) + '\n')

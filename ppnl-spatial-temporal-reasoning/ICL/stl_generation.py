@@ -31,7 +31,7 @@ Combine Predicates with the Boolean operators:
 
 Wrap Predicates in temporal operators:
 * Always(p)      -> Predicate   (p holds at every step)
-* Eventually(p)  -> Predicate   (p holds at some step)
+* Eventually(p)  -> Predicate   (p holds at some step).
 * Until(p, q)    -> Predicate   (p holds until q becomes true)
 
 Do NOT import any modules, redefine any of these operators, or use lambda functions.
@@ -188,10 +188,11 @@ def main():
                 rec = json.loads(line)
                 if rec.get("_config"):
                     continue
-                results.append(rec)
-                done_ids.add(rec["id"])
+                if rec.get("attempts") and rec["attempts"][-1]["error"] is None or '```' not in rec["attempts"][-1]["error"]:
+                    results.append(rec)
+                    done_ids.add(rec["id"])
         if done_ids:
-            print(f"Resuming: {len(done_ids)} samples already done, skipping them.")
+            print(f"Resuming: {len(done_ids)} succeeded samples skipped, re-running failures.")
 
     for i, sample in enumerate(data):
         if i in done_ids:
@@ -220,11 +221,11 @@ def main():
             if start == -1:
                 start = raw.find("```")
             if start == -1:
-                error = "No ```python block found in response"
-                break
-            start = raw.find("\n", start) + 1  # skip past the opening fence line
-            end = raw.find("```", start)
-            stl = raw[start:end].strip() if end != -1 else raw[start:].strip()
+                stl = raw.strip()
+            else:
+                start = raw.find("\n", start) + 1  # skip past the opening fence line
+                end = raw.find("```", start)
+                stl = raw[start:end].strip() if end != -1 else raw[start:].strip()
             error = check_stl(sample, stl)
 
             attempts.append({
