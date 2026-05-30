@@ -47,7 +47,7 @@ COLS = [
 ROW_LABELS = [f"Try {k}" for k in range(1, MAX_TRIES + 1)]
 
 KEY_TEMPLATES = {
-    "code_form":     "code_form_stanford_{model}_{geo}_{split}_k7_code",
+    "code_form":     "code_form_{model}_{geo}_{split}_k7_code",
     "text_feedback": "text_feedback_{geo}_{split}_k7_code_{model}",
 }
 
@@ -64,8 +64,9 @@ def load_csv():
 
 
 def cumulative_success_rate(csv_rows, key, n_tries):
-    """Cumulative success rate after at most n_tries attempts."""
-    row = csv_rows.get(key, {})
+    """Cumulative success rate after at most n_tries attempts.
+    Matches any CSV row whose file key ends with `key` to ignore provider prefixes."""
+    row = next((r for k, r in csv_rows.items() if k.endswith(key)), {})
     n = row.get("n_samples", "")
     if n in ("", None):
         return np.nan
@@ -108,7 +109,7 @@ def plot_heatmap(ax, matrix, col_labels, title):
                 ax.text(j, i, "N/A", ha="center", va="center",
                         fontsize=11, color="#666666")
             else:
-                color = "white" if v > 0.55 else "black"
+                color = "white" if v > 0.55 else "#666666"
                 ax.text(j, i, f"{v:.0%}", ha="center", va="center",
                         fontsize=11, fontweight="bold", color=color)
 
@@ -120,7 +121,7 @@ def plot_heatmap(ax, matrix, col_labels, title):
     ax.set_title(title, fontsize=13, fontweight="bold", pad=10)
 
     cb = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.02)
-    cb.set_label("Success rate (%)", fontsize=11)
+    cb.set_label("Success rate (%)", fontsize=12)
     cb.ax.tick_params(labelsize=10)
 
 # ---------------------------------------------------------------------------
@@ -157,7 +158,7 @@ def main():
     col_labels = [lbl for _, _, lbl in COLS]
     mat = build_matrix(csv_rows, key_template_full, model)
 
-    fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(6.5, 3.5), constrained_layout=True)
     plot_heatmap(ax, mat, col_labels, title)
 
     out = Path(out)
