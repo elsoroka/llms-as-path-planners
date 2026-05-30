@@ -47,8 +47,8 @@ COLS = [
 ROW_LABELS = [f"Try {k}" for k in range(1, MAX_TRIES + 1)]
 
 KEY_TEMPLATES = {
-    "code_form":     "code_form_{model}_{geo}_{split}_k7_code",
-    "text_feedback": "text_feedback_{geo}_{split}_k7_code_{model}",
+    "code_form":     "_{model}_{geo}_{split}_k7_code",
+    "text_feedback": "_{geo}_{split}_k7_code_{model}",
 }
 
 # ---------------------------------------------------------------------------
