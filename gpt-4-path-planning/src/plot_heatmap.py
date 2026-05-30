@@ -1,19 +1,22 @@
 """
-Heatmap + ablation delta for gpt-4-path-planning results.
+Heatmap of cumulative success rate by try number for gpt-4-path-planning results.
 
-One heatmap per model (2 pages):
-  rows    = text (1 try) | code (1 try) | text-feedback k=7 | code-form k=7
+Shape: 7 rows (try 1–7) × 6 columns (benchmark conditions)
+  rows    = success after at most n tries  (n = 1 … 7)
   columns = 6 geometry × split conditions
-  cells   = success rate
 
-Third page: ablation delta bar chart (code-form k=7 minus text-feedback k=7)
-            for Gemini 2.0 Flash Lite, the only model with both strategies.
+Usage:
+  python plot_heatmap.py --model gemini-2.0-flash-001 --strategy code_form
+  python plot_heatmap.py --model gemini-2.0-flash-lite-001 --strategy text_feedback
+
+  Or pass a custom key template (must contain {geo} and {split} placeholders):
+  python plot_heatmap.py --key-template "code_form_stanford_gemini-2.0-flash-001_{geo}_{split}_k7_code" --title "My Model"
 
 Saved to:
-  outputs/heatmap_{model_id}.pdf  (one per model)
-  outputs/heatmap_ablation_delta.pdf
+  outputs/heatmap_{model}_{strategy}.pdf   (or --output to override)
 """
 
+import argparse
 import csv
 import numpy as np
 from pathlib import Path
@@ -25,6 +28,8 @@ import matplotlib.pyplot as plt
 SRC_DIR  = Path(__file__).parent
 CSV_PATH = SRC_DIR / "outputs" / "results.csv"
 OUT_DIR  = SRC_DIR / "outputs"
+
+MAX_TRIES = 7
 
 # ---------------------------------------------------------------------------
 # Layout constants
@@ -39,18 +44,12 @@ COLS = [
     ("zig_zag",   "ood", "Zig-zag\nOOD"),
 ]
 
-ROW_LABELS = [
-    "Text\n(1 try)",
-    "Code\n(1 try)",
-    "Text-feedback\n(k=7)",
-    "Code-form\n(k=7)",
-]
+ROW_LABELS = [f"Try {k}" for k in range(1, MAX_TRIES + 1)]
 
-MODELS = [
-    # (csv_model_fragment, display_label, has_text_feedback)
-    ("gemini-2.0-flash-001",      "Gemini 2.0 Flash",      False),
-    ("gemini-2.0-flash-lite-001", "Gemini 2.0 Flash Lite", True),
-]
+KEY_TEMPLATES = {
+    "code_form":     "code_form_stanford_{model}_{geo}_{split}_k7_code",
+    "text_feedback": "text_feedback_{geo}_{split}_k7_code_{model}",
+}
 
 # ---------------------------------------------------------------------------
 # Data helpers
@@ -64,34 +63,31 @@ def load_csv():
     return rows
 
 
-def _float(csv_rows, key, field):
-    val = csv_rows.get(key, {}).get(field, "")
-    return float(val) if val not in ("", None) else np.nan
-
-
-def get_rate(csv_rows, key):
-    return _float(csv_rows, key, "success_rate")
-
-
-def get_try1_rate(csv_rows, key):
-    n   = _float(csv_rows, key, "n_samples")
-    n1  = _float(csv_rows, key, "n_success_try_1")
-    if np.isnan(n) or n == 0:
+def cumulative_success_rate(csv_rows, key, n_tries):
+    """Cumulative success rate after at most n_tries attempts."""
+    row = csv_rows.get(key, {})
+    n = row.get("n_samples", "")
+    if n in ("", None):
         return np.nan
-    return n1 / n
+    n = float(n)
+    if n == 0:
+        return np.nan
+    total = 0.0
+    for k in range(1, n_tries + 1):
+        val = row.get(f"n_success_try_{k}", "")
+        if val in ("", None):
+            break
+        total += float(val)
+    return total / n
 
 
-def build_matrix(csv_rows, model_frag, has_text_feedback):
-    """4 × 6 success-rate matrix. NaN where data is absent."""
-    mat = np.full((4, 6), np.nan)
+def build_matrix(csv_rows, key_template, model):
+    """Return (MAX_TRIES × 6) matrix of cumulative success rates."""
+    mat = np.full((MAX_TRIES, len(COLS)), np.nan)
     for j, (geo, split, _) in enumerate(COLS):
-        cf_key = f"code_form_stanford_{model_frag}_{geo}_{split}_k7_code"
-        tf_key = f"text_feedback_{geo}_{split}_k7_code_{model_frag}"
-        if has_text_feedback:
-            mat[0, j] = get_try1_rate(csv_rows, tf_key)   # text 1-try
-            mat[2, j] = get_rate(csv_rows, tf_key)         # text-feedback k=7
-        mat[1, j] = get_try1_rate(csv_rows, cf_key)        # code 1-try
-        mat[3, j] = get_rate(csv_rows, cf_key)             # code-form k=7
+        key = key_template.format(model=model, geo=geo, split=split)
+        for i in range(MAX_TRIES):
+            mat[i, j] = cumulative_success_rate(csv_rows, key, i + 1)
     return mat
 
 # ---------------------------------------------------------------------------
@@ -100,7 +96,7 @@ def build_matrix(csv_rows, model_frag, has_text_feedback):
 
 def plot_heatmap(ax, matrix, col_labels, title):
     cmap = matplotlib.colormaps["YlGn"].copy()
-    cmap.set_bad(color="#CCCCCC")   # grey for N/A cells
+    cmap.set_bad(color="#CCCCCC")
 
     masked = np.ma.masked_invalid(matrix * 100)
     im = ax.imshow(masked, aspect="auto", cmap=cmap, vmin=0, vmax=100)
@@ -110,92 +106,62 @@ def plot_heatmap(ax, matrix, col_labels, title):
             v = matrix[i, j]
             if np.isnan(v):
                 ax.text(j, i, "N/A", ha="center", va="center",
-                        fontsize=12, color="#666666")
+                        fontsize=11, color="#666666")
             else:
                 color = "white" if v > 0.55 else "black"
                 ax.text(j, i, f"{v:.0%}", ha="center", va="center",
-                        fontsize=13, fontweight="bold", color=color)
+                        fontsize=11, fontweight="bold", color=color)
 
     ax.set_xticks(range(len(col_labels)))
-    ax.set_xticklabels(col_labels, fontsize=13)
-    ax.set_yticks(range(len(ROW_LABELS)))
-    ax.set_yticklabels(ROW_LABELS, fontsize=13)
-    ax.set_title(title, fontsize=15, fontweight="bold", pad=12)
+    ax.set_xticklabels(col_labels, fontsize=12)
+    ax.set_yticks(range(MAX_TRIES))
+    ax.set_yticklabels(ROW_LABELS, fontsize=12)
+    ax.set_ylabel("Success after ≤ n tries", fontsize=12)
+    ax.set_title(title, fontsize=13, fontweight="bold", pad=10)
 
     cb = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.02)
-    cb.set_label("Success rate (%)", fontsize=12)
-    cb.ax.tick_params(labelsize=11)
-
-    # horizontal divider between 1-try rows and k=7 rows
-    ax.axhline(1.5, color="black", linewidth=1.5, linestyle="--")
-
-# ---------------------------------------------------------------------------
-# Ablation delta figure
-# ---------------------------------------------------------------------------
-
-def plot_ablation_delta(ax, csv_rows):
-    model_frag = "gemini-2.0-flash-lite-001"
-    cf_rates, tf_rates = [], []
-    for geo, split, _ in COLS:
-        cf_rates.append(get_rate(csv_rows, f"code_form_stanford_{model_frag}_{geo}_{split}_k7_code"))
-        tf_rates.append(get_rate(csv_rows, f"text_feedback_{geo}_{split}_k7_code_{model_frag}"))
-
-    cf = np.array(cf_rates) * 100
-    tf = np.array(tf_rates) * 100
-    delta = cf - tf
-
-    x = np.arange(len(COLS))
-    col_labels = [lbl for _, _, lbl in COLS]
-
-    # side-by-side bars: text-feedback and code-form
-    w = 0.35
-    ax.bar(x - w / 2, tf,    width=w, label="Text-feedback (k=7)",
-           color="#AAAAAA", hatch="///", edgecolor="black", linewidth=0.8)
-    ax.bar(x + w / 2, cf,    width=w, label="Code-form (k=7)",
-           color="#4878CF", hatch="xxx", edgecolor="black", linewidth=0.8)
-
-    for xi, (t, c) in enumerate(zip(tf, cf)):
-        d = c - t
-        top = max(t, c)
-        ax.text(xi, top + 1.5, f"Δ{d:+.0f}pp",
-                ha="center", va="bottom", fontsize=11, fontweight="bold")
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(col_labels, fontsize=13)
-    ax.set_ylabel("Success rate (%)", fontsize=13)
-    ax.set_ylim(0, 105)
-    ax.tick_params(axis="y", labelsize=12)
-    ax.spines[["top", "right"]].set_visible(False)
-    ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.6)
-    ax.set_axisbelow(True)
-    ax.legend(fontsize=12, framealpha=0.9)
-    ax.set_title(
-        "Ablation: code representation vs. direction-token output\n"
-        "Gemini 2.0 Flash Lite, k=7 feedback rounds",
-        fontsize=14, fontweight="bold", pad=10,
-    )
+    cb.set_label("Success rate (%)", fontsize=11)
+    cb.ax.tick_params(labelsize=10)
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
+    parser = argparse.ArgumentParser(description="Plot per-try cumulative success heatmap.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--model",    help="Model fragment (e.g. gemini-2.0-flash-001).")
+    group.add_argument("--key-template",
+                       help="Full CSV key template with {geo} and {split} placeholders.")
+
+    parser.add_argument("--strategy", choices=list(KEY_TEMPLATES), default="code_form",
+                        help="Strategy name (used with --model). Default: code_form.")
+    parser.add_argument("--title",  default=None,
+                        help="Plot title. Defaults to model + strategy.")
+    parser.add_argument("--output", default=None,
+                        help="Output PDF path. Defaults to outputs/heatmap_{model}_{strategy}.pdf.")
+    args = parser.parse_args()
+
+    if args.model:
+        key_template_full = KEY_TEMPLATES[args.strategy]
+        model = args.model
+        title  = args.title or f"{model} — {args.strategy}"
+        out    = args.output or OUT_DIR / f"heatmap_{model}_{args.strategy}.pdf"
+    else:
+        key_template_full = args.key_template
+        model = ""
+        title  = args.title or args.key_template
+        out    = args.output or OUT_DIR / "heatmap_custom.pdf"
+
     csv_rows = load_csv()
     col_labels = [lbl for _, _, lbl in COLS]
+    mat = build_matrix(csv_rows, key_template_full, model)
 
-    for model_frag, model_label, has_tf in MODELS:
-        mat = build_matrix(csv_rows, model_frag, has_tf)
-        fig, ax = plt.subplots(figsize=(13, 5), constrained_layout=True)
-        plot_heatmap(ax, mat, col_labels,
-                     f"25×25 gridworld planning — {model_label}")
-        out = OUT_DIR / f"heatmap_{model_frag}.pdf"
-        fig.savefig(out)
-        plt.close(fig)
-        print(f"Saved → {out}")
+    fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
+    plot_heatmap(ax, mat, col_labels, title)
 
-    fig, ax = plt.subplots(figsize=(12, 5), constrained_layout=True)
-    plot_ablation_delta(ax, csv_rows)
-    out = OUT_DIR / "heatmap_ablation_delta.pdf"
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved → {out}")
