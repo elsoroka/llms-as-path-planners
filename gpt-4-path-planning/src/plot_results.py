@@ -32,15 +32,17 @@ x = list(range(len(test_set_order)))
 
 model_color = {
     "gpt-4":                    "tab:green",
+    "gpt-4.1":                  "tab:green",
     "gemini-2.0-flash-001":     "tab:blue",
     "gemini-2.0-flash-lite-001":"tab:orange",
 }
 
 # (method, model, linestyle, marker, label)
 combos = [
-    ("code_form",    "gpt-4",                     "-",  "^", "Code-Form / GPT-4"),
+    ("code_form",    "gpt-4.1",                   "-",  "^", "Code-Form / GPT-4.1"),
     ("code_form",    "gemini-2.0-flash-001",       "-",  "o", "Code-Form / Flash"),
     ("code_form",    "gemini-2.0-flash-lite-001",  "-",  "s", "Code-Form / Flash-Lite"),
+    ("text_feedback","gpt-4.1",                    "--", "^", "Text-Feedback / GPT-4.1"),
     ("text_feedback","gemini-2.0-flash-001",       "--", "o", "Text-Feedback / Flash"),
     ("text_feedback","gemini-2.0-flash-lite-001",  "--", "s", "Text-Feedback / Flash-Lite"),
 ]
@@ -59,7 +61,7 @@ def get_rates(df, method, model, metric):
 
 
 # --- Success rate ---
-fig, ax = plt.subplots(figsize=(9, 6))
+fig, ax = plt.subplots(figsize=(7, 5))
 
 for method, model, ls, marker, label in combos:
     rates = get_rates(df, method, model, "success_rate")
@@ -74,7 +76,7 @@ ax.set_title("25x25 Path Planning Results by Model", fontsize=15)
 ax.set_ylim(0, 1.1)
 ax.tick_params(axis="y", labelsize=13)
 # put the legend outside the plot
-ax.legend(fontsize=13, ncols=2, loc="upper left", bbox_to_anchor=(0, -0.15),
+ax.legend(fontsize=13, ncols=2, loc="upper left", bbox_to_anchor=(0, -0.23),
           borderaxespad=0)
 ax.grid(axis="y", linestyle=":", linewidth=0.7)
 
@@ -84,7 +86,7 @@ print("Saved outputs/25x25_results_by_model.pdf")
 
 
 # --- Optimality rate ---
-fig, ax = plt.subplots(figsize=(9, 6))
+fig, ax = plt.subplots(figsize=(7, 5))
 
 for method, model, ls, marker, label in combos:
     rates = get_rates(df, method, model, "optimal_rate")
@@ -98,7 +100,7 @@ ax.set_ylabel("Optimal Rate (up to 7 attempts)", fontsize=13)
 ax.set_title("25x25 Path Planning Optimality by Model", fontsize=15)
 ax.set_ylim(0, 1.0)
 ax.tick_params(axis="y", labelsize=13)
-ax.legend(fontsize=13, ncols=2, loc="upper left", bbox_to_anchor=(0, -0.15),
+ax.legend(fontsize=13, ncols=2, loc="upper left", bbox_to_anchor=(0, -0.23),
           borderaxespad=0)
 ax.grid(axis="y", linestyle=":", linewidth=0.7)
 

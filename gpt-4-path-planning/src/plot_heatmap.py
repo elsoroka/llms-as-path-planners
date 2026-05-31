@@ -65,8 +65,12 @@ def load_csv():
 
 def cumulative_success_rate(csv_rows, key, n_tries):
     """Cumulative success rate after at most n_tries attempts.
-    Matches any CSV row whose file key ends with `key` to ignore provider prefixes."""
+    Matches any CSV row whose file key ends with `key` to ignore provider prefixes.
+    Falls back to replacing _k7_code_ with _k7_text_ when no match found."""
     row = next((r for k, r in csv_rows.items() if k.endswith(key)), {})
+    if not row:
+        key = key.replace("_k7_code_", "_k7_text_")
+        row = next((r for k, r in csv_rows.items() if k.endswith(key)), {})
     n = row.get("n_samples", "")
     if n in ("", None):
         return np.nan
@@ -95,7 +99,7 @@ def build_matrix(csv_rows, key_template, model):
 # Heatmap figure
 # ---------------------------------------------------------------------------
 
-def plot_heatmap(ax, matrix, col_labels, title):
+def plot_heatmap(ax, matrix, col_labels, title, yaxis, legend):
     cmap = matplotlib.colormaps["YlGn"].copy()
     cmap.set_bad(color="#CCCCCC")
 
@@ -115,14 +119,20 @@ def plot_heatmap(ax, matrix, col_labels, title):
 
     ax.set_xticks(range(len(col_labels)))
     ax.set_xticklabels(col_labels, fontsize=12)
-    ax.set_yticks(range(MAX_TRIES))
-    ax.set_yticklabels(ROW_LABELS, fontsize=12)
-    ax.set_ylabel("Success after ≤ n tries", fontsize=12)
+    if yaxis:
+        ax.set_yticks(range(MAX_TRIES))
+        ax.set_yticklabels(ROW_LABELS, fontsize=12)
+        ax.set_ylabel("Success after ≤ n tries", fontsize=12)
+
+    else:
+        ax.set_yticks([])
+
     ax.set_title(title, fontsize=13, fontweight="bold", pad=10)
 
-    cb = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.02)
-    cb.set_label("Success rate (%)", fontsize=12)
-    cb.ax.tick_params(labelsize=10)
+    if legend:
+        cb = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.02)
+        cb.set_label("Success rate (%)", fontsize=12)
+        cb.ax.tick_params(labelsize=10)
 
 # ---------------------------------------------------------------------------
 # Main
@@ -141,6 +151,10 @@ def main():
                         help="Plot title. Defaults to model + strategy.")
     parser.add_argument("--output", default=None,
                         help="Output PDF path. Defaults to outputs/heatmap_{model}_{strategy}.pdf.")
+    parser.add_argument("--yaxis", action="store_true",
+                        help="Show y-axis labels (try numbers).", default=False)
+    parser.add_argument('--legend', action="store_true", default=False,
+                        help="Show legend.")
     args = parser.parse_args()
 
     if args.model:
@@ -159,7 +173,7 @@ def main():
     mat = build_matrix(csv_rows, key_template_full, model)
 
     fig, ax = plt.subplots(figsize=(6.5, 3.5), constrained_layout=True)
-    plot_heatmap(ax, mat, col_labels, title)
+    plot_heatmap(ax, mat, col_labels, title, args.yaxis, args.legend)
 
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
