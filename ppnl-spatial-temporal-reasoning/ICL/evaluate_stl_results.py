@@ -6,11 +6,15 @@ CSV to outputs/stl_results_summary.csv.
 
 Success is defined as: the last recorded attempt has error == null.
 
-Filename convention parsed:
-  stl[_math][_stanford|_openai|_vllm]_<model>_<geometry>_<split>_k<max_tries>_<representation>.jsonl
+Filename conventions parsed:
+  stl[_math][_stanford]_<model>_<test_stem>.jsonl
 
-  e.g. stl_gpt-4.1_maze_iid_k7_code.jsonl
-       stl_math_gemini-2.0-flash-001_rectangle_ood_k3_text.jsonl
+Test stems → human-readable labels:
+  ICL_test_set                  -> seen 6x6
+  ICL_test_set_5x5worlds        -> unseen 5x5
+  ICL_test_set_7x7worlds        -> unseen 7x7
+  ICL_test_set_moreobsts        -> 6x6 more obstacles
+  test_seen_6x6_samples         -> seen 6x6
 """
 import json
 import os
@@ -19,6 +23,14 @@ import csv
 
 OUTPUTS_DIR = os.path.join(os.path.dirname(__file__), "outputs")
 OUT_CSV     = os.path.join(OUTPUTS_DIR, "stl_results_summary.csv")
+
+STEM_LABELS = {
+    "ICL_test_set":               "seen 6x6",
+    "ICL_test_set_5x5worlds":     "unseen 5x5",
+    "ICL_test_set_7x7worlds":     "unseen 7x7",
+    "ICL_test_set_moreobsts":     "6x6 more obstacles",
+    "test_seen_6x6_samples":      "seen 6x6",
+}
 
 KNOWN_MODELS = sorted([
     "gemini-2.0-flash-001",
@@ -29,14 +41,17 @@ KNOWN_MODELS = sorted([
     "gpt-3.5-turbo",
 ], key=len, reverse=True)
 
-KNOWN_GEOMETRIES = ["zig_zag", "rectangle", "maze"]  # longest first to avoid prefix clash
-KNOWN_SPLITS     = ["iid", "ood"]
+KNOWN_STEMS = sorted(STEM_LABELS.keys(), key=len, reverse=True)
 
 
 def parse_filename(name: str):
     """
-    Return (method, provider, model, geometry, split, max_tries, representation)
-    or None if unrecognised.
+    Return (method, provider, model, test_set_label) or None if unrecognised.
+
+    method   : 'stl' | 'stl_math'
+    provider : 'stanford' | 'openai' | ''
+    model    : model name string
+    test_set : human-readable label
     """
     if not name.endswith(".jsonl"):
         return None
@@ -64,6 +79,7 @@ def parse_filename(name: str):
             rest = rest[len(tok):]
             break
 
+    # rest is now _<model>_<test_stem>
     rest = rest.lstrip("_")
 
     # --- model ---
@@ -75,46 +91,18 @@ def parse_filename(name: str):
             break
 
     if model is None:
-        # Fallback: consume up to the first known geometry
-        for geo in KNOWN_GEOMETRIES:
-            if geo in rest:
-                idx = rest.index(geo)
+        # Fallback: consume up to the first known test stem
+        for ks in KNOWN_STEMS:
+            if ks in rest:
+                idx = rest.index(ks)
                 model = rest[:idx].rstrip("_")
-                rest  = rest[idx:]
+                rest  = ks
                 break
         if model is None:
             return None
 
-    # --- geometry ---
-    geometry = None
-    for geo in KNOWN_GEOMETRIES:
-        if rest.startswith(geo):
-            geometry = geo
-            rest = rest[len(geo):].lstrip("_")
-            break
-
-    if geometry is None:
-        return None
-
-    # --- split ---
-    split = None
-    for sp in KNOWN_SPLITS:
-        if rest.startswith(sp):
-            split = sp
-            rest  = rest[len(sp):].lstrip("_")
-            break
-
-    if split is None:
-        return None
-
-    # --- max_tries (kN) ---
-    m = re.match(r"k(\d+)_(.*)", rest)
-    if m is None:
-        return None
-    max_tries      = int(m.group(1))
-    representation = m.group(2)  # e.g. "code" or "text"
-
-    return method, provider, model, geometry, split, max_tries, representation
+    test_set = STEM_LABELS.get(rest, rest)
+    return method, provider, model, test_set
 
 
 def success_rate(records):
@@ -126,6 +114,7 @@ def success_rate(records):
         n_total += 1
         attempts = r.get("attempts", [])
         if not attempts:
+            # No attempts recorded — treat as failure
             continue
         if attempts[-1]["error"] is None:
             n_success += 1
@@ -195,7 +184,7 @@ def main():
         if parsed is None:
             print(f"  skip (unrecognised): {fname}")
             continue
-        method, provider, model, geometry, split, max_tries, representation = parsed
+        method, provider, model, test_set = parsed
 
         records   = load_jsonl(os.path.join(OUTPUTS_DIR, fname))
         n, n_succ = success_rate(records)
@@ -205,30 +194,27 @@ def main():
         ecounts = error_counts(records) if method.startswith("stl_math") else {}
 
         row = {
-            "method":         method,
-            "provider":       provider,
-            "model":          model,
-            "geometry":       geometry,
-            "split":          split,
-            "max_tries":      max_tries,
-            "representation": representation,
-            "n_samples":      n,
-            "n_success":      n_succ,
-            "success_rate":   f"{rate:.4f}",
+            "method":       method,
+            "provider":     provider,
+            "model":        model,
+            "test_set":     test_set,
+            "n_samples":    n,
+            "n_success":    n_succ,
+            "success_rate": f"{rate:.4f}",
         }
         for cat in ERROR_CATEGORIES + ["other"]:
             row[f"n_{cat}"] = ecounts.get(cat, "")
 
         rows.append(row)
-        print(f"  {method:10s} | {model:30s} | {geometry:10s} | {split:3s} | k{max_tries} | "
-              f"{representation:5s} | {n_succ}/{n} = {rate:.1%}")
+        print(f"  {method:10s} | {model:30s} | {test_set:25s} | "
+              f"{n_succ}/{n} = {rate:.1%}")
 
     if not rows:
         print("No STL results found.")
         return
 
-    fieldnames = ["method", "provider", "model", "geometry", "split",
-                  "max_tries", "representation", "n_samples", "n_success", "success_rate"] + \
+    fieldnames = ["method", "provider", "model", "test_set",
+                  "n_samples", "n_success", "success_rate"] + \
                  [f"n_{cat}" for cat in ERROR_CATEGORIES + ["other"]]
     with open(OUT_CSV, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
