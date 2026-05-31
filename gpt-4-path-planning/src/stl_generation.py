@@ -182,7 +182,7 @@ def main():
                 rec = json.loads(line)
                 if rec.get("_config"):
                     continue
-                if rec.get("attempts") and rec["attempts"][-1]["error"] is None or '```' not in rec["attempts"][-1]["error"]:
+                if rec.get("attempts") and rec["attempts"][-1]["error"] is None:
                     results.append(rec)
                     done_ids.add(rec["id"])
         if done_ids:
@@ -233,17 +233,18 @@ def main():
                 if try_num < max_tries:
                     messages.append({"role": "assistant", "content": raw})
                     messages.append({"role": "user", "content": build_feedback_message(error)})
-
-                result = {
-                    "id":                  i,
-                    "code_representation": sample["code_representation"],
-                    "ground_truth":        sample["path"],
-                    "world":               sample["world"],
-                    "attempts":            attempts,
-                }
-                results.append(result)
             except Exception as e:
                 print("Sample skipped due to error: ", e)
+                break
+
+        result = {
+            "id":                  i,
+            "code_representation": sample["code_representation"],
+            "ground_truth":        sample["path"],
+            "world":               sample["world"],
+            "attempts":            attempts,
+        }
+        results.append(result)
 
         with open(output_file, 'w') as f:
             f.write(json.dumps(config) + '\n')

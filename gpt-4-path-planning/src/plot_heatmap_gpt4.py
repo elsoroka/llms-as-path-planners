@@ -100,21 +100,21 @@ def plot_heatmap(ax, matrix, col_labels, title):
             v = matrix[i, j]
             if np.isnan(v):
                 ax.text(j, i, "N/A", ha="center", va="center",
-                        fontsize=12, color="#666666")
+                        fontsize=15, color="#666666")
             else:
                 color = "white" if v > 0.55 else "black"
                 ax.text(j, i, f"{v:.0%}", ha="center", va="center",
-                        fontsize=13, fontweight="bold", color=color)
+                        fontsize=16, fontweight="bold", color=color)
 
     ax.set_xticks(range(len(col_labels)))
-    ax.set_xticklabels(col_labels, fontsize=13)
+    ax.set_xticklabels(col_labels, fontsize=16)
     ax.set_yticks(range(len(ROW_LABELS)))
-    ax.set_yticklabels(ROW_LABELS, fontsize=13)
-    ax.set_title(title, fontsize=15, fontweight="bold", pad=12)
+    ax.set_yticklabels(ROW_LABELS, fontsize=16)
+    ax.set_title(title, fontsize=18, fontweight="bold", pad=12)
 
     cb = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.02)
-    cb.set_label("Success rate (%)", fontsize=12)
-    cb.ax.tick_params(labelsize=11)
+    cb.set_label("Success rate (%)", fontsize=15)
+    cb.ax.tick_params(labelsize=14)
 
     # horizontal divider between 1-try rows and k=7 rows
     ax.axhline(1.5, color="black", linewidth=1.5, linestyle="--")

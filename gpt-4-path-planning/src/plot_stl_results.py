@@ -39,7 +39,7 @@ combos = [
     ("stl_math", "gpt-4.1",                   "--", "^", "STL Math / GPT-4.1"),
 ]
 
-fig, ax = plt.subplots(figsize=(9, 5))
+fig, ax = plt.subplots(figsize=(9, 4))
 
 for method, model, ls, marker, label in combos:
     subset = df[(df["method"] == method) & (df["model"] == model)]
@@ -60,13 +60,13 @@ ax.set_xticks(x)
 ax.set_xticklabels(x_labels, fontsize=11)
 ax.set_ylabel("Pass Rate", fontsize=14)
 ax.set_xlabel("Geometry / Split", fontsize=14)
-ax.set_title("GPT-4 Path Planning: STL Results by Model", fontsize=15)
+ax.set_title("25x25 Path Planning: STL Results by Model", fontsize=15)
 ax.set_ylim(0, 1.1)
 ax.tick_params(axis="y", labelsize=12)
 ax.legend(fontsize=11)
 ax.grid(axis="y", linestyle=":", linewidth=0.7)
 
 fig.tight_layout()
-out_path = os.path.join(OUTPUTS_DIR, "stl_results_by_model.pdf")
+out_path = os.path.join(OUTPUTS_DIR, "25x25_stl_results_by_model.pdf")
 fig.savefig(out_path)
 print(f"Saved {out_path}")

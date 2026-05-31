@@ -228,7 +228,7 @@ def main():
         help="Model provider (default: openai).",
     )
     parser.add_argument(
-        "--model", default="gpt-4",
+        "--model", default="gpt-4.1",
         help="Model name. For --provider vllm, use the HuggingFace model name "
              "(e.g. deepseek-ai/deepseek-moe-16b-chat). Default: %(default)s.",
     )
@@ -283,8 +283,28 @@ def main():
         "argv":                vars(args),
     }
 
+    # Resume: load any already-completed records from the output file.
     results = []
+    completed_ids = set()
+    if os.path.exists(args.output_jsonl):
+        with open(args.output_jsonl) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                if rec.get("_config"):
+                    continue
+                results.append(rec)
+                completed_ids.add(rec["id"])
+        if completed_ids:
+            print(f"Resuming: loaded {len(completed_ids)} completed sample(s) "
+                  f"(ids {min(completed_ids)}–{max(completed_ids)}).")
+
     for i, sample in enumerate(data):
+        if i in completed_ids:
+            print(f"\n--- Sample {i} (already done, skipping) ---")
+            continue
         print(f"\n--- Sample {i} ---")
         initial_prompt = build_prompt(sample[sample_field], representation)
 
