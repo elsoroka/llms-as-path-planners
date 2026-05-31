@@ -132,12 +132,32 @@ def success_rate(records):
     return n_total, n_success
 
 
-ERROR_CATEGORIES = [
+MATH_ERROR_CATEGORIES = [
     "syntax_error",
     "eval_error",
     "rejects_correct_path",
     "accepts_wrong_endpoint",
     "accepts_obstacle",
+]
+
+CODE_ERROR_CATEGORIES = [
+    "exec_error",
+    "type_error",
+    "rejects_correct_path",
+    "accepts_wrong_endpoint",
+    "accepts_obstacle",
+]
+
+# Union of both sets for CSV columns (math-only, code-only, shared, other).
+ALL_ERROR_CATEGORIES = [
+    "syntax_error",       # stl_math: rtamt parse failure
+    "eval_error",         # stl_math: formula evaluation exception
+    "exec_error",         # stl (code): exec/eval of safe_paths raised an exception
+    "type_error",         # stl (code): typecheck failure
+    "rejects_correct_path",
+    "accepts_wrong_endpoint",
+    "accepts_obstacle",
+    "other",
 ]
 
 
@@ -158,9 +178,32 @@ def classify_math_error(error_str: str) -> str:
     return "other"
 
 
-def error_counts(records) -> dict:
+def classify_code_error(error_str: str) -> str:
+    """Map a check_stl (code-form) error string to a category name."""
+    if error_str is None:
+        return None
+    if "Failed to evaluate the STL expression" in error_str:
+        return "exec_error"
+    if "The STL expression is not valid" in error_str:
+        return "type_error"
+    if "not true for the ground-truth trajectory" in error_str:
+        return "rejects_correct_path"
+    if "Doesn't reach the goal" in error_str:
+        return "accepts_wrong_endpoint"
+    if "Hits an obstacle" in error_str:
+        return "accepts_obstacle"
+    return "other"
+
+
+def error_counts(records, method: str) -> dict:
     """Count how many failed samples fall into each error category (final attempt)."""
-    counts = {cat: 0 for cat in ERROR_CATEGORIES}
+    if method.startswith("stl_math"):
+        categories = MATH_ERROR_CATEGORIES
+        classify_fn = classify_math_error
+    else:
+        categories = CODE_ERROR_CATEGORIES
+        classify_fn = classify_code_error
+    counts = {cat: 0 for cat in categories}
     counts["other"] = 0
     for r in records:
         if "_config" in r:
@@ -171,7 +214,7 @@ def error_counts(records) -> dict:
         last_error = attempts[-1]["error"]
         if last_error is None:
             continue  # success — don't count
-        cat = classify_math_error(last_error)
+        cat = classify_fn(last_error)
         counts[cat] = counts.get(cat, 0) + 1
     return counts
 
@@ -201,8 +244,7 @@ def main():
         n, n_succ = success_rate(records)
         rate      = n_succ / n if n > 0 else float("nan")
 
-        # Error breakdown — only meaningful for stl_math* files
-        ecounts = error_counts(records) if method.startswith("stl_math") else {}
+        ecounts = error_counts(records, method)
 
         row = {
             "method":         method,
@@ -216,7 +258,7 @@ def main():
             "n_success":      n_succ,
             "success_rate":   f"{rate:.4f}",
         }
-        for cat in ERROR_CATEGORIES + ["other"]:
+        for cat in ALL_ERROR_CATEGORIES:
             row[f"n_{cat}"] = ecounts.get(cat, "")
 
         rows.append(row)
@@ -229,7 +271,7 @@ def main():
 
     fieldnames = ["method", "provider", "model", "geometry", "split",
                   "max_tries", "representation", "n_samples", "n_success", "success_rate"] + \
-                 [f"n_{cat}" for cat in ERROR_CATEGORIES + ["other"]]
+                 [f"n_{cat}" for cat in ALL_ERROR_CATEGORIES]
     with open(OUT_CSV, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
