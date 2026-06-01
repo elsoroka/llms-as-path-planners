@@ -67,6 +67,9 @@ def parse_filename(name: str):
         m       = re.match(r"(code_form_k\d+)(.*)", stem)
         method  = m.group(1)
         rest    = m.group(2)
+    elif stem.startswith("code_form_harder"):
+        method  = "code_form_harder"
+        rest    = stem[len("code_form_harder"):]
     elif stem.startswith("code_form"):
         method  = "code_form"
         rest    = stem[len("code_form"):]
@@ -170,6 +173,46 @@ def optimality_stats(records):
     return n_optimal, n_success
 
 
+def count_comment_stats(records):
+    """
+    Return (total_comment_lines, total_code_lines) across all attempts in all records.
+
+    Definitions (so that `something() # note` and `# note\\nsomething()` yield
+    the same ratio):
+      - code_lines:    non-empty, non-fence lines whose stripped content does NOT
+                       start with '#' (lines that contain actual code, with or
+                       without an inline comment).
+      - comment_lines: non-empty, non-fence lines whose stripped content contains
+                       '#' anywhere (pure comment lines AND inline-commented code
+                       lines both count).
+    """
+    def _tally(response):
+        comment, code = 0, 0
+        for raw in response.splitlines():
+            s = raw.strip()
+            if not s or s.startswith("```"):
+                continue
+            if "#" in s:
+                comment += 1
+            if not s.startswith("#"):
+                code += 1
+        return comment, code
+
+    total_comment, total_code = 0, 0
+    for r in records:
+        if "_config" in r:
+            continue
+        for attempt in r.get("attempts", []):
+            c, t = _tally(attempt.get("response", ""))
+            total_comment += c
+            total_code    += t
+        if "response" in r and "attempts" not in r:
+            c, t = _tally(r["response"])
+            total_comment += c
+            total_code    += t
+    return total_comment, total_code
+
+
 def load_jsonl(path):
     records = []
     with open(path) as f:
@@ -196,21 +239,28 @@ def main():
         rate           = n_succ / n if n > 0 else float("nan")
         n_opt, n_succ2 = optimality_stats(records)
         opt_rate       = (n_opt / n) if n > 0 else float("nan")
+        n_comment, n_code = count_comment_stats(records)
+        cr             = n_comment / n_code if n_code else None
 
         rows.append({
-            "method":           method,
-            "provider":         provider,
-            "model":            model,
-            "test_set":         test_set,
-            "n_samples":        n,
-            "n_success":        n_succ,
-            "success_rate":     f"{rate:.4f}",
-            "n_optimal":        n_opt,
-            "optimality_rate":  f"{opt_rate:.4f}",
+            "method":                method,
+            "provider":              provider,
+            "model":                 model,
+            "test_set":              test_set,
+            "n_samples":             n,
+            "n_success":             n_succ,
+            "success_rate":          f"{rate:.4f}",
+            "n_optimal":             n_opt,
+            "optimality_rate":       f"{opt_rate:.4f}",
+            "total_comment_lines":   n_comment,
+            "total_code_lines":      n_code,
+            "comment_ratio":         f"{cr:.4f}" if cr is not None else "",
         })
         opt_str = f"{n_opt}/{n_succ2} = {opt_rate:.1%}"
+        cr_str  = f"{cr:.1%}" if cr is not None else "n/a"
         print(f"  {method:20s} | {model:30s} | {test_set:30s} | "
-              f"success {n_succ}/{n} = {rate:.1%} | optimal {opt_str}")
+              f"success {n_succ}/{n} = {rate:.1%} | optimal {opt_str} | "
+              f"comment ratio {cr_str}")
 
     if not rows:
         print("No results found.")
@@ -218,7 +268,8 @@ def main():
 
     fieldnames = ["method", "provider", "model", "test_set",
                   "n_samples", "n_success", "success_rate",
-                  "n_optimal", "optimality_rate"]
+                  "n_optimal", "optimality_rate",
+                  "total_comment_lines", "total_code_lines", "comment_ratio"]
     with open(OUT_CSV, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()

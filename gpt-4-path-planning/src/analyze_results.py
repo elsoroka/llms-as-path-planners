@@ -218,6 +218,39 @@ def _extract_config(config):
 
 
 # ---------------------------------------------------------------------------
+# Comment-ratio helpers
+# ---------------------------------------------------------------------------
+
+def _count_comment_lines(response):
+    """
+    Return (comment_lines, code_lines) for a response string.
+
+    Definitions (so that `something() # note` and `# note\\nsomething()` yield
+    the same ratio):
+      - code_lines:    non-empty, non-fence lines whose stripped content does NOT
+                       start with '#' (i.e. lines that contain actual code,
+                       whether or not they also carry an inline comment).
+      - comment_lines: non-empty, non-fence lines whose stripped content contains
+                       '#' anywhere (pure comment lines AND inline-commented code
+                       lines both count).
+
+    ratio = comment_lines / code_lines  (may exceed 1 if there are more
+    standalone comment lines than code lines).
+    """
+    comment_lines = 0
+    code_lines = 0
+    for raw_line in response.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith('```'):
+            continue
+        if '#' in stripped:
+            comment_lines += 1
+        if not stripped.startswith('#'):
+            code_lines += 1
+    return comment_lines, code_lines
+
+
+# ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
 
@@ -238,10 +271,12 @@ def _evaluate(jsonl_path):
         else:
             records.append(obj)
 
-    n           = len(records)
-    n_success   = 0
-    n_optimal   = 0
-    by_try      = {}
+    n                    = len(records)
+    n_success            = 0
+    n_optimal            = 0
+    by_try               = {}
+    total_comment_lines = 0
+    total_code_lines    = 0
 
     for rec in records:
         actions, error, successful_try = _resolve(rec)
@@ -254,16 +289,32 @@ def _evaluate(jsonl_path):
             t = successful_try or 1
             by_try[t] = by_try.get(t, 0) + 1
 
+        # Accumulate comment stats across every attempt
+        for attempt in rec.get('attempts', []):
+            c, t = _count_comment_lines(attempt.get('response', ''))
+            total_comment_lines += c
+            total_code_lines    += t
+        # Single-response format (no attempts list)
+        if 'response' in rec and not rec.get('attempts'):
+            c, t = _count_comment_lines(rec['response'])
+            total_comment_lines += c
+            total_code_lines    += t
+
     max_try = max(by_try, default=1)
+    comment_ratio = (total_comment_lines / total_code_lines
+                     if total_code_lines else None)
 
     metrics = {
-        'n_samples':    n,
-        'n_success':    n_success,
-        'success_rate': n_success / n if n else 0.0,
-        'n_optimal':    n_optimal,
-        'optimal_rate': n_optimal / n if n else 0.0,
-        'by_try':       by_try,
-        'max_try':      max_try,
+        'n_samples':          n,
+        'n_success':          n_success,
+        'success_rate':       n_success / n if n else 0.0,
+        'n_optimal':          n_optimal,
+        'optimal_rate':       n_optimal / n if n else 0.0,
+        'by_try':             by_try,
+        'max_try':            max_try,
+        'total_comment_lines': total_comment_lines,
+        'total_code_lines':   total_code_lines,
+        'comment_ratio':      comment_ratio,
     }
     return config, metrics
 
@@ -313,39 +364,46 @@ def main():
 
         max_try_global = max(max_try_global, metrics['max_try'])
 
+        cr = metrics['comment_ratio']
         row = {
-            'file':           stem,
-            'geometry':       fn_info['geometry'],
-            'split':          fn_info['split'],
-            'grid_size':      fn_info['grid_size'],
-            'visibility':     fn_info['visibility'],
-            'representation': cfg['repr'] or fn_info['repr'],
-            'model':          cfg['model'],
-            'temperature':    cfg['temperature'],
-            'max_tries':      cfg['max_tries'] or fn_info['max_tries'],
-            'max_samples':    cfg['max_samples'],
-            'n_samples':      metrics['n_samples'],
-            'n_success':      metrics['n_success'],
-            'success_rate':   round(metrics['success_rate'], 4),
-            'n_optimal':      metrics['n_optimal'],
-            'optimal_rate':   round(metrics['optimal_rate'], 4),
+            'file':                  stem,
+            'geometry':              fn_info['geometry'],
+            'split':                 fn_info['split'],
+            'grid_size':             fn_info['grid_size'],
+            'visibility':            fn_info['visibility'],
+            'representation':        cfg['repr'] or fn_info['repr'],
+            'model':                 cfg['model'],
+            'temperature':           cfg['temperature'],
+            'max_tries':             cfg['max_tries'] or fn_info['max_tries'],
+            'max_samples':           cfg['max_samples'],
+            'n_samples':             metrics['n_samples'],
+            'n_success':             metrics['n_success'],
+            'success_rate':          round(metrics['success_rate'], 4),
+            'n_optimal':             metrics['n_optimal'],
+            'optimal_rate':          round(metrics['optimal_rate'], 4),
+            'total_comment_lines':   metrics['total_comment_lines'],
+            'total_code_lines':      metrics['total_code_lines'],
+            'comment_ratio':         round(cr, 4) if cr is not None else '',
         }
         for t, cnt in metrics['by_try'].items():
             row[f'n_success_try_{t}'] = cnt
 
         rows.append(row)
+        cr_str = f"{cr:.1%}" if cr is not None else "n/a"
         print(
             f"{stem}: "
             f"{metrics['n_success']}/{metrics['n_samples']} success "
             f"({metrics['success_rate']:.1%}), "
             f"{metrics['n_optimal']}/{metrics['n_samples']} optimal "
-            f"({metrics['optimal_rate']:.1%})"
+            f"({metrics['optimal_rate']:.1%}), "
+            f"comment ratio {cr_str}"
         )
 
     fixed_fields = [
         'file', 'geometry', 'split', 'grid_size', 'visibility', 'representation',
         'model', 'temperature', 'max_tries', 'max_samples',
         'n_samples', 'n_success', 'success_rate', 'n_optimal', 'optimal_rate',
+        'total_comment_lines', 'total_code_lines', 'comment_ratio',
     ]
     try_fields = [f'n_success_try_{t}' for t in range(1, max_try_global + 1)]
 
