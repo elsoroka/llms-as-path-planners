@@ -17,9 +17,8 @@ ONE_SHOT_TASK = (
 )
 ONE_SHOT_CODE = """\
 def solve():
-    # started at row 0, col 1; goal is row 3, col 4
-    move_x(3)   # right 3 cols: col 1 -> col 4  (now at row 0, col 4)
-    move_y(3)   # down  3 rows: row 0 -> row 3  (now at row 3, col 4 = goal)"""
+    move_x(3)
+    move_y(3)"""
 
 
 def build_prompt(nl_description: str) -> str:

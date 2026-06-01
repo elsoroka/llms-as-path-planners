@@ -111,6 +111,8 @@ class And(Predicate):
             self.ps = list(ps)
 
     def __call__(self) -> np.array:
+        if len(self.ps) == 0:
+            return np.array([True])
         p1 = self.ps[0]()
         for p in self.ps[1:]:
             p1 = p1 & p() # logical and
@@ -130,6 +132,8 @@ class Or(Predicate):
             self.ps = list(ps)
 
     def __call__(self) -> np.array:
+        if len(self.ps) == 0:
+            return np.array([False])
         p1 = self.ps[0]()
         for p in self.ps[1:]:
             p1 = p1 | p() # logical or
@@ -205,7 +209,7 @@ class Until(Predicate):
             return np.array([True])
         
         for i in range(len(t1)-1):
-            if all(t1[:i]) and t2[i+1:]:
+            if all(t1[:i]) and t2[i+1]:
                 return np.array([True])
             
         return np.array([False])

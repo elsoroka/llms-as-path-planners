@@ -36,14 +36,15 @@ MODELS = [
     ("gemini-2.0-flash-lite-001", "Gemini 2.0 Flash Lite"),
 ]
 
-# Three series per model — distinct color + hatch for B&W legibility
+# Four series per model — distinct color + hatch for B&W legibility
 SERIES = [
-    {"label": "baseline 5-shot",      "color": "#AAAAAA", "hatch": "///"},
-    {"label": "code-form (try 1)",     "color": "#88BB44", "hatch": "..."},
-    {"label": "code-form (any try)",   "color": "#4878CF", "hatch": "xxx"},
+    {"label": "baseline 5-shot",         "color": "#AAAAAA", "hatch": "///"},
+    {"label": "code-form (try 1)",        "color": "#88BB44", "hatch": "..."},
+    {"label": "code-form (any try)",      "color": "#4878CF", "hatch": "xxx"},
+    {"label": "code-form (no comments)",  "color": "#CC6677", "hatch": "+++"},
 ]
 
-BAR_WIDTH   = 0.22
+BAR_WIDTH   = 0.18
 N_BOOTSTRAP = 2000
 
 
@@ -113,7 +114,14 @@ def load_model_data(model_id):
             print(f"  WARNING: missing {cf_path.name}")
             cf_try1 = cf_total = np.array([])
 
-        data[stem] = {"baseline": baseline, "cf_try1": cf_try1, "cf_total": cf_total}
+        harder_path = OUTPUTS_DIR / f"code_form_harder_stanford_{model_id}_{stem}.jsonl"
+        if harder_path.exists():
+            _, cf_harder = load_code_form(harder_path)
+        else:
+            print(f"  WARNING: missing {harder_path.name}")
+            cf_harder = np.array([])
+
+        data[stem] = {"baseline": baseline, "cf_try1": cf_try1, "cf_total": cf_total, "cf_harder": cf_harder}
     return data
 
 
@@ -125,7 +133,7 @@ def make_figure(data, model_label, rng):
     offsets  = np.linspace(-(n_series - 1) / 2,
                             (n_series - 1) / 2, n_series) * BAR_WIDTH
     x        = np.arange(n_groups)
-    data_keys = ["baseline", "cf_try1", "cf_total"]
+    data_keys = ["baseline", "cf_try1", "cf_total", "cf_harder"]
 
     for s, offset, dk in zip(SERIES, offsets, data_keys):
         arrays = [data[ts][dk] for ts, _ in TESTSETS]

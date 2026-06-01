@@ -3,6 +3,9 @@ from stl_def import *
 
 def evaluate_stl(stl: str, x: Trajectory, y: Trajectory):
     """Evaluate an STL string that is either a bare expression or a safe_paths(x, y) function def."""
+    # make sre we run the function in the exec
+    stl += '\nsafe_paths(x,y)' # this is a hack to make sure we run the function in the exec environment
+
     globals_dict = {
         "x": x,
         "y": y,
@@ -45,8 +48,8 @@ def check_stl(sample: dict, stl: str) -> str | None:
     for i, row in enumerate(sample['world']):
         for j, cell in enumerate(row):
             if cell == 1:
-                x_obstacle = x_true + [i]
-                y_obstacle = y_true + [j]
+                x_obstacle = [i] +  x_true
+                y_obstacle = [j] + y_true
                 should_fail.append((x_obstacle, y_obstacle, f"Hits an obstacle at ({i}, {j})."))
 
     # Typecheck against the first passing trajectory.
@@ -59,13 +62,16 @@ def check_stl(sample: dict, stl: str) -> str | None:
 
     try:
         stl_expr.typecheck()
-    except Exception as e:
+    except TypeError as e:
         return f"The STL expression is not valid. Error: {e}"
+    except Exception as e:
+        raise e
 
     for xs, ys in should_pass:
         traj_x = Trajectory(xs)
         traj_y = Trajectory(ys)
         stl_expr = evaluate_stl(stl, traj_x, traj_y)
+        
         if not all(stl_expr()):
             traj_str = " -> ".join([f"({xi}, {yi})" for xi, yi in zip(xs, ys)])
             return f"The STL expression is not true for the ground-truth trajectory {traj_str}."

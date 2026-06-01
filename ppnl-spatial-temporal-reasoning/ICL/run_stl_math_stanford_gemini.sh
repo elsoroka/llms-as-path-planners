@@ -28,7 +28,7 @@ for model in "${MODELS[@]}"; do
 
         echo "=== stl | $model | $test_file ==="
         python "$SCRIPT_DIR/stl_math_generation.py" "$input" \
-            "$OUT_DIR/stl_math_stanford_${model}_${stem}.jsonl" \
+            "$OUT_DIR/stl_math_harder_stanford_${model}_${stem}.jsonl" \
             --provider stanford --model "$model" \
             --max-samples 100 --max-tries 3
     done

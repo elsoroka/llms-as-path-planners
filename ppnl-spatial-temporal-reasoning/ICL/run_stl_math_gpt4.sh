@@ -23,7 +23,7 @@ for test_file in "${TEST_SETS[@]}"; do
 
     echo "=== stl_math | $MODEL | $test_file ==="
     python "$SCRIPT_DIR/stl_math_generation.py" "$input" \
-        "$OUT_DIR/stl_math_${MODEL}_${stem}.jsonl" \
+        "$OUT_DIR/stl_math_harder_${MODEL}_${stem}.jsonl" \
         --provider openai --model "$MODEL" \
         --max-samples 100 --max-tries 3
 done

@@ -27,14 +27,14 @@ for model in "${MODELS[@]}"; do
         input="$DATA_DIR/$test_file"
         stem="${test_file%.json}"
 
-        echo "=== baseline | $model | $test_file ==="
-        python "$SCRIPT_DIR/run_baseline.py" "$input" \
-            "$OUT_DIR/baseline_5shot_stanford_${model}_${stem}.jsonl" \
-            --provider stanford --model "$model" --max-samples 100
+        #echo "=== baseline | $model | $test_file ==="
+        #python "$SCRIPT_DIR/run_baseline.py" "$input" \
+        #    "$OUT_DIR/baseline_5shot_stanford_${model}_${stem}.jsonl" \
+        #    --provider stanford --model "$model" --max-samples 100
 
         echo "=== code-form | $model | $test_file ==="
         python "$SCRIPT_DIR/code_form.py" "$input" \
-            "$OUT_DIR/code_form_stanford_${model}_${stem}.jsonl" \
+            "$OUT_DIR/code_form_harder_stanford_${model}_${stem}.jsonl" \
             --provider stanford --model "$model" --max-samples 100
     done
 done

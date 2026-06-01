@@ -30,7 +30,7 @@ TEST_SETS=(
 
 for test_file in "${TEST_SETS[@]}"; do
     input="$DATA_DIR/$test_file"
-    stem="code_form_k${MAX_TRIES}_${test_file%.json}"
+    stem="code_form_harder_k${MAX_TRIES}_${test_file%.json}"
     raw="$OUT_DIR/${stem}.jsonl"
     parsed="$OUT_DIR/${stem}_parsed.json"
 

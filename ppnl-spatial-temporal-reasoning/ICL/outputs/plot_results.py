@@ -28,14 +28,14 @@ combos = [
     ("baseline_5shot",  "gemini-2.0-flash-001",      "--", "o", "Baseline / Flash"),
     ("baseline_5shot",  "gemini-2.0-flash-lite-001", "--", "s", "Baseline / Flash-Lite"),
     ("baseline_5shot",  "gpt4",                      "--", "^", "Baseline / GPT-4"),
-    ("code_form",       "gemini-2.0-flash-001",      "-",  "o", "Code-Form / Flash"),
-    ("code_form",       "gemini-2.0-flash-lite-001", "-",  "s", "Code-Form / Flash-Lite"),
-    ("code_form",       "gpt4_k7",                   "-",  "^", "Code-Form / GPT-4"),
-    ("code_form_harder","gemini-2.0-flash-001",      ":",  "o", "Code-Form (no comments) / Flash"),
-    ("code_form_harder","gemini-2.0-flash-lite-001", ":",  "s", "Code-Form (no comments) / Flash-Lite"),
+    ("code_form",       "gemini-2.0-flash-001",      "-",  "o", "Code / Flash"),
+    ("code_form",       "gemini-2.0-flash-lite-001", "-",  "s", "Code / Flash-Lite"),
+    ("code_form",       "gpt4_k7",                   "-",  "^", "Code / GPT-4"),
+    ("code_form_harder","gemini-2.0-flash-001",      ":",  "o", "Code (no comments) / Flash"),
+    ("code_form_harder","gemini-2.0-flash-lite-001", ":",  "s", "Code (no comments) / Flash-Lite"),
 ]
 
-fig, ax = plt.subplots(figsize=(9, 6))
+fig, ax = plt.subplots(figsize=(8.25, 6))
 
 for method, model, ls, marker, label in combos:
     subset = df[(df["method"] == method) & (df["model"] == model)]
@@ -54,16 +54,16 @@ ax.set_title("PPNL Results by Model", fontsize=16)
 ax.set_ylim(0, 1.1)
 ax.tick_params(axis="y", labelsize=14)
 # put the legend outside the plot
-ax.legend(fontsize=14, ncols=2, loc="upper left", bbox_to_anchor=(0, -0.15),
+ax.legend(fontsize=14, ncols=2, loc="upper left", bbox_to_anchor=(0, -0.18),
           borderaxespad=0)
 ax.grid(axis="y", linestyle=":", linewidth=0.7)
 
 fig.tight_layout()
-fig.savefig("results_by_model.pdf", bbox_inches="tight")
-print("Saved results_by_model.pdf")
+fig.savefig("ppnl_results_by_model.pdf", bbox_inches="tight")
+print("Saved ppnl_results_by_model.pdf")
 
 
-fig, ax = plt.subplots(figsize=(9, 6))
+fig, ax = plt.subplots(figsize=(8.25, 6))
 
 for method, model, ls, marker, label in combos:
     subset = df[(df["method"] == method) & (df["model"] == model)]
@@ -81,10 +81,10 @@ ax.set_ylabel("Optimal Rate (1 attempt)", fontsize=14)
 ax.set_title("PPNL Optimality by Model", fontsize=16)
 ax.set_ylim(0, 1.0)
 ax.tick_params(axis="y", labelsize=14)
-ax.legend(fontsize=14, ncols=2, loc="upper left", bbox_to_anchor=(0, -0.15),
+ax.legend(fontsize=14, ncols=2, loc="upper left", bbox_to_anchor=(0, -0.18),
           borderaxespad=0)
 ax.grid(axis="y", linestyle=":", linewidth=0.7)
 
 fig.tight_layout()
-fig.savefig("optimality_results_by_model.pdf", bbox_inches="tight")
-print("Saved optimality_results_by_model.pdf")
+fig.savefig("ppnl_optimality_results_by_model.pdf", bbox_inches="tight")
+print("Saved ppnl_optimality_results_by_model.pdf")

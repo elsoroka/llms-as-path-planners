@@ -13,7 +13,7 @@ MODELS=(
     "gemini-2.0-flash-lite-001"
 )
 MAX_TRIES=7
-MAX_SAMPLES=50
+MAX_SAMPLES=100
 
 TEST_SETS=(
     "rectangle iid rectangle_data_sg_iid.json"

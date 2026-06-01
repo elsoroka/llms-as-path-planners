@@ -188,7 +188,7 @@ def main():
                 rec = json.loads(line)
                 if rec.get("_config"):
                     continue
-                if rec.get("attempts") and rec["attempts"][-1]["error"] is None or '```' not in rec["attempts"][-1]["error"]:
+                if rec.get("attempts") and rec["attempts"][-1]["error"] is None:
                     results.append(rec)
                     done_ids.add(rec["id"])
         if done_ids:
@@ -199,10 +199,8 @@ def main():
             print(f"\n--- Sample {i} (skipped, already done) ---")
             continue
         print(f"\n--- Sample {i} ---")
-        sc = sample.get('solution_coordinates')
-        if not isinstance(sc, list) or not sc or not isinstance(sc[-1], (list, tuple)) or len(sc[-1]) < 2:
-            print("  Skipping: no valid solution_coordinates")
-            continue
+        # Normalize gpt-4 data format to PPNL format if needed.
+        sample = _normalize_sample(sample)
         initial_prompt = build_prompt(sample)
 
         # Build the message history for this sample; grows on retries.
